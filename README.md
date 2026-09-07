@@ -177,6 +177,7 @@ A typical local setup for this LangChain template looks like:
   - `AnthropicAI` with `ANTHROPICAI_API_KEY_SECRET`
   - `GeminiAI` with `GEMINIAI_API_KEY_SECRET`
   - `BEDROCKAI` with `BEDROCK_AI_API_KEY_SECRET`
+  - `AzureFoundryAI` with `AZURE_FOUNDRY_AI_API_KEY_SECRET` and `AZURE_FOUNDRY_AI_ENDPOINT`
   - or `Ollama` with a reachable `OLLAMA_BASE_URL`
 
 ### Secret Management
@@ -185,6 +186,8 @@ A typical local setup for this LangChain template looks like:
 - Set `ANTHROPICAI_API_KEY_SECRET` to resolve the Anthropic API key from the configured secret backend.
 - Set `GEMINIAI_API_KEY_SECRET` to resolve the Gemini API key from the configured secret backend.
 - Set `BEDROCK_AI_API_KEY_SECRET` to resolve the AWS Bedrock API key from the configured secret backend.
+- Set `AZURE_FOUNDRY_AI_API_KEY_SECRET` to resolve the Azure Foundry AI API key from the configured secret backend.
+- Set `AZURE_FOUNDRY_AI_ENDPOINT` to the full Azure Foundry AI model endpoint.
 - Set `CLOUD_PROVIDER=AWS` to retrieve secrets from AWS Secrets Manager.
 - Set `CLOUD_PROVIDER=AZURE` to retrieve secrets from Azure Key Vault.
 - When using AWS, configure `AWS_REGION` as needed.

@@ -10,7 +10,7 @@ from latest_ai_development.config.settings import get_settings, normalize_provid
 
 load_dotenv()
 
-SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "Ollama")
+SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "AzureFoundryAI", "Ollama")
 
 
 def resolve_api_key(
@@ -138,6 +138,58 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
             api_key=api_key,
         )
 
+    if provider == "azurefoundryai":
+
+        endpoint = (
+            section_config.get("endpoint") or getattr(settings, "azurefoundryai_endpoint", "")
+        ).strip().rstrip("/")
+        api_key = resolve_api_key(
+            getattr(settings, "azurefoundryai_api_key_secret", "")
+        )
+
+        if not endpoint:
+            raise ValueError(
+                "Azure Foundry AI endpoint not found. Set AZURE_FOUNDRY_AI_ENDPOINT."
+            )
+
+        if not api_key:
+            raise ValueError(
+                "Azure Foundry AI API key not found. Set AZURE_FOUNDRY_AI_API_KEY_SECRET."
+            )
+
+        route, base_url = _azure_foundry_ai_route(endpoint)
+
+        if route == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except ImportError as exc:
+                raise ImportError(
+                    "Azure Foundry AI anthropic models require the 'langchain-anthropic' "
+                    "package. Run `uv sync` to install template dependencies."
+                ) from exc
+
+            return ChatAnthropic(
+                **_anthropic_kwargs(model_name, generation_defaults),
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+        try:
+            from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
+        except ImportError as exc:
+            raise ImportError(
+                "Azure Foundry AI OpenAI-compatible models require the "
+                "'langchain-azure-ai' package. Run `uv sync` to install "
+                "template dependencies."
+            ) from exc
+
+        return AzureAIOpenAIApiChatModel(
+            **_openai_kwargs(model_name, generation_defaults),
+            credential=api_key,
+            endpoint=base_url,
+            use_responses_api=route == "responses",
+        )
+
     if provider == "ollama":
 
         return ChatOllama(
@@ -147,6 +199,20 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
 
     raise ValueError(
         f"Unsupported provider '{raw_provider}'. Expected one of: {', '.join(SUPPORTED_PROVIDERS)}"
+    )
+
+
+def _azure_foundry_ai_route(endpoint: str) -> tuple[str, str]:
+    endpoint_lower = endpoint.lower()
+    if endpoint_lower.endswith("/openai/v1/chat/completions"):
+        return "chat_completions", f"{endpoint[: -len('/chat/completions')]}/"
+    if endpoint_lower.endswith("/openai/v1/responses"):
+        return "responses", f"{endpoint[: -len('/responses')]}/"
+    if endpoint_lower.endswith("/anthropic/v1/messages"):
+        return "anthropic", endpoint[: -len("/v1/messages")]
+    raise ValueError(
+        "Unsupported Azure Foundry AI endpoint. Expected endpoint ending with "
+        "/openai/v1/chat/completions, /openai/v1/responses, or /anthropic/v1/messages."
     )
 
 
