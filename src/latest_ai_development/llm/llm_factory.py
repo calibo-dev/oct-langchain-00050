@@ -197,6 +197,27 @@ def _apply_common_generation_defaults(kwargs: dict[str, Any], defaults: dict[str
 
 
 def _openai_kwargs(model_name: str, defaults: dict[str, Any]) -> dict[str, Any]:
+    if model_name.lower().startswith("gpt-5"):
+        return _openai_kwargs_gpt_5(model_name, defaults)
+
+    return _openai_kwargs_non_gpt_5(model_name, defaults)
+
+
+def _openai_kwargs_gpt_5(model_name: str, defaults: dict[str, Any]) -> dict[str, Any]:
+    """Build GPT-5 arguments without unsupported sampling and penalty parameters."""
+    kwargs: dict[str, Any] = {"model": model_name}
+
+    if "maxOutputTokens" in defaults:
+        kwargs["max_completion_tokens"] = defaults["maxOutputTokens"]
+
+    response_format = defaults.get("responseFormat")
+    if isinstance(response_format, dict):
+        kwargs["model_kwargs"] = {"response_format": response_format}
+
+    return kwargs
+
+
+def _openai_kwargs_non_gpt_5(model_name: str, defaults: dict[str, Any]) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"model": model_name}
     _apply_common_generation_defaults(kwargs, defaults)
 
