@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from latest_ai_development.config.settings import get_settings
@@ -65,7 +66,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/ask")
-def ask(request: AskRequest) -> dict[str, str]:
+def ask(request: AskRequest):
     """
     Execute the research + reporting workflow.
     """
@@ -91,15 +92,12 @@ def ask(request: AskRequest) -> dict[str, str]:
                 raise
             result = workflow.kickoff(inputs)
     except Exception as exc:
-        logger.exception(
-            "Request failed | flow_run_id=%s | topic=%s",
-            flow_run_id,
-            request.topic,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Workflow execution failed. flow_run_id={flow_run_id}",
-        ) from exc
+        logger.error(f"Error occurred while asking the workflow: {exc}")
+        content = {
+            "status": "error",
+            "response": "Something went wrong. Please contact your administrator.",
+        }
+        return JSONResponse(status_code=500, content=content)
 
     logger.info(
         "Request completed | flow_run_id=%s | topic=%s",
@@ -108,8 +106,11 @@ def ask(request: AskRequest) -> dict[str, str]:
     )
 
     return {
-        "topic": result.get("topic"),
-        "report": result.get("report"),
+        "status": "success",
+        "response": {
+            "topic": result.get("topic"),
+            "report": result.get("report"),
+        },
     }
 
 
