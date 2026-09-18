@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from dotenv import load_dotenv
@@ -120,10 +121,17 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
 
         api_key = resolve_api_key(getattr(settings, "bedrockai_api_key_secret", ""))
 
+        region_name = os.getenv("AWS_REGION_NAME", "").strip()
+
         if not api_key:
             raise ValueError(
                 "BedrockAI API key not found. "
                 "Set BEDROCK_AI_API_KEY_SECRET."
+            )
+        if not region_name:
+            raise ValueError(
+                "AWS_REGION_NAME is required for the BEDROCKAI provider. "
+                "Configure a region where Amazon Bedrock is available."
             )
         try:
             from langchain_aws import ChatBedrockConverse
@@ -136,6 +144,7 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
         return ChatBedrockConverse(
             **_bedrock_kwargs(model_name, generation_defaults),
             api_key=api_key,
+            region_name=region_name,
         )
 
     if provider == "ollama":
