@@ -54,7 +54,7 @@ Supported provider values:
 - `AnthropicAI`
 - `GeminiAI`
 - `BEDROCKAI`
-- `AzureFoundryAI`
+- `MicrosoftFoundryAI`
 - `Ollama`
 
 ### LLM Initialization
@@ -272,14 +272,14 @@ The system uses environment variables to resolve runtime configuration.
 - **`GEMINIAI_API_KEY_SECRET`**
   - **Purpose**: Secret name used to resolve the Gemini API key from the configured secret manager
 
-- **`BEDROCK_AI_API_KEY_SECRET`**
+- **`BEDROCKAI_API_KEY_SECRET`**
   - **Purpose**: Secret name used to resolve the AWS Bedrock API key from the configured secret manager
 
-- **`AZURE_FOUNDRY_AI_API_KEY_SECRET`**
-  - **Purpose**: Secret name used to resolve the Azure Foundry AI API key from the configured secret manager
+- **`MICROSOFTFOUNDRYAI_API_KEY_SECRET`**
+  - **Purpose**: Secret name used to resolve the Microsoft Foundry AI API key from the configured secret manager
 
-- **`AZURE_FOUNDRY_AI_ENDPOINT`**
-  - **Purpose**: Specifies the Azure Foundry AI endpoint
+- **`MICROSOFTFOUNDRYAI_ENDPOINT`**
+  - **Purpose**: Specifies the MICROSOFT FOUNDRY AI provider base endpoint
 
 - **`CLOUD_PROVIDER`**
   - **Purpose**: Selects the secret backend

@@ -19,7 +19,7 @@ PROVIDER_ALIASES = {
     "anthropic": "anthropicai",
     "gemini": "geminiai",
     "bedrock": "bedrockai",
-    "azurefoundry": "azurefoundryai",
+    "microsoftfoundry": "microsoftfoundryai",
 }
 
 
@@ -65,11 +65,11 @@ class Settings(BaseSettings):
     geminiai_api_key_secret: str = Field(default="", alias="GEMINIAI_API_KEY_SECRET")
 
     # Bedrock
-    bedrockai_api_key_secret: str = Field(default="", alias="BEDROCK_AI_API_KEY_SECRET")
+    bedrockai_api_key_secret: str = Field(default="", alias="BEDROCKAI_API_KEY_SECRET")
 
-    # Azure Foundry AI
-    azurefoundryai_endpoint: str = Field(default="", alias="AZURE_FOUNDRY_AI_ENDPOINT")
-    azurefoundryai_api_key_secret: str = Field(default="", alias="AZURE_FOUNDRY_AI_API_KEY_SECRET")
+    # Microsoft Foundry AI
+    microsoftfoundryai_endpoint: str = Field(default="", alias="MICROSOFTFOUNDRYAI_ENDPOINT")
+    microsoftfoundryai_api_key_secret: str = Field(default="", alias="MICROSOFTFOUNDRYAI_API_KEY_SECRET")
 
     # Secret Manager
     cloud_provider: str = Field(default="", alias="CLOUD_PROVIDER")

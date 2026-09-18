@@ -10,7 +10,7 @@ from latest_ai_development.config.settings import get_settings, normalize_provid
 
 load_dotenv()
 
-SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "AzureFoundryAI", "Ollama")
+SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "MicrosoftFoundryAI", "Ollama")
 
 
 def resolve_api_key(
@@ -123,7 +123,7 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
         if not api_key:
             raise ValueError(
                 "BedrockAI API key not found. "
-                "Set BEDROCK_AI_API_KEY_SECRET."
+                "Set BEDROCKAI_API_KEY_SECRET."
             )
         try:
             from langchain_aws import ChatBedrockConverse
@@ -138,33 +138,30 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
             api_key=api_key,
         )
 
-    if provider == "azurefoundryai":
+    if provider == "microsoftfoundryai":
 
-        endpoint = (
-            section_config.get("endpoint") or getattr(settings, "azurefoundryai_endpoint", "")
-        ).strip().rstrip("/")
+        endpoint = getattr(settings, "microsoftfoundryai_endpoint", "")
         api_key = resolve_api_key(
-            getattr(settings, "azurefoundryai_api_key_secret", "")
+            getattr(settings, "microsoftfoundryai_api_key_secret", "")
         )
-
         if not endpoint:
             raise ValueError(
-                "Azure Foundry AI endpoint not found. Set AZURE_FOUNDRY_AI_ENDPOINT."
+                "Microsoft Foundry AI endpoint not found. Set MICROSOFTFOUNDRYAI_ENDPOINT."
             )
 
         if not api_key:
             raise ValueError(
-                "Azure Foundry AI API key not found. Set AZURE_FOUNDRY_AI_API_KEY_SECRET."
+                "Microsoft Foundry AI API key not found. Set MICROSOFTFOUNDRYAI_API_KEY_SECRET."
             )
 
-        route, base_url = _azure_foundry_ai_route(endpoint)
+        route, base_url = _microsoftfoundryai_route(endpoint)
 
         if route == "anthropic":
             try:
                 from langchain_anthropic import ChatAnthropic
             except ImportError as exc:
                 raise ImportError(
-                    "Azure Foundry AI anthropic models require the 'langchain-anthropic' "
+                    "Microsoft Foundry AI anthropic models require the 'langchain-anthropic' "
                     "package. Run `uv sync` to install template dependencies."
                 ) from exc
 
@@ -178,7 +175,7 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
             from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
         except ImportError as exc:
             raise ImportError(
-                "Azure Foundry AI OpenAI-compatible models require the "
+                "Microsoft Foundry AI OpenAI-compatible models require the "
                 "'langchain-azure-ai' package. Run `uv sync` to install "
                 "template dependencies."
             ) from exc
@@ -187,7 +184,6 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
             **_openai_kwargs(model_name, generation_defaults),
             credential=api_key,
             endpoint=base_url,
-            use_responses_api=route == "responses",
         )
 
     if provider == "ollama":
@@ -202,19 +198,15 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
     )
 
 
-def _azure_foundry_ai_route(endpoint: str) -> tuple[str, str]:
+def _microsoftfoundryai_route(endpoint: str) -> tuple[str, str]:
     endpoint_lower = endpoint.lower()
-    if endpoint_lower.endswith("/openai/v1/chat/completions"):
-        return "chat_completions", f"{endpoint[: -len('/chat/completions')]}/"
-    if endpoint_lower.endswith("/openai/v1/responses"):
-        return "responses", f"{endpoint[: -len('/responses')]}/"
-    if endpoint_lower.endswith("/anthropic/v1/messages"):
-        return "anthropic", endpoint[: -len("/v1/messages")]
+    if endpoint_lower.endswith("/anthropic"):
+        return "anthropic", endpoint
+    if endpoint_lower.endswith("/openai"):
+        return "openai", f"{endpoint}/v1/"
     raise ValueError(
-        "Unsupported Azure Foundry AI endpoint. Expected endpoint ending with "
-        "/openai/v1/chat/completions, /openai/v1/responses, or /anthropic/v1/messages."
+        "MICROSOFTFOUNDRYAI_ENDPOINT must end with /anthropic or /openai."
     )
-
 
 def get_llm_candidates(model_config: dict[str, Any]) -> list[Any]:
     """Return primary plus optional fallback LLMs for a stage."""
