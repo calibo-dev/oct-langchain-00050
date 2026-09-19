@@ -60,10 +60,15 @@ def _create_agent_runtime(
     runtime_agents: list[Any] = []
     model_names: list[str] = []
     tools = tool_registry.get(definition.tools)
-    middleware = [StrictToolCallingMiddleware()] if tools else []
-
     for model in definition.model:
         llm = model_registry.get(model.provider, model.model_id)
+        # Strict tool conversion is OpenAI-specific; other providers receive
+        # their native schemas without an unsupported model parameter.
+        middleware = (
+            [StrictToolCallingMiddleware()]
+            if tools and model.provider.strip().lower() == "openai"
+            else []
+        )
         runtime_agents.append(
             create_agent(
                 model=llm,

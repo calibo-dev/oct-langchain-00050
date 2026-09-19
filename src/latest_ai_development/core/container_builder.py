@@ -48,22 +48,22 @@ class ApplicationContainerBuilder:
         logger.info("Application startup started")
 
         settings = self._load_settings()
-        logger.info("\n\nLoaded settings:\n%s", settings)
+        logger.debug("Loaded settings:\n%s", settings)
         workflow_definition = self._load_workflow()
-        logger.info("\n\nLoaded workflow definition:\n%s", workflow_definition)
+        logger.debug("Loaded workflow definition:\n%s", workflow_definition)
         agent_definitions = self._load_active_agents(workflow_definition)
-        logger.info("\n\nLoaded active agent definitions:\n%s", agent_definitions)
+        logger.debug("Loaded active agent definitions:\n%s", agent_definitions)
         model_references = self._find_active_models(agent_definitions)
-        logger.info("\n\n Resolved active model references:\n%s", model_references)
+        logger.debug("Resolved active model references:\n%s", model_references)
         tool_names = self._find_active_tools(agent_definitions)
-        logger.info("\n\n Resolved active tool names:\n%s", tool_names)
+        logger.debug("Resolved active tool names:\n%s", tool_names)
 
         models_configuration = self._load_active_models(model_references)
-        logger.info("\n\nLoaded active models configuration:\n%s", models_configuration)
+        logger.debug("Loaded active models configuration:\n%s", models_configuration)
         tools_configuration = self._load_active_tools(tool_names)
-        logger.info("\n\nLoaded active tools configuration:\n%s", tools_configuration)
+        logger.debug("Loaded active tools configuration:\n%s", tools_configuration)
         connections_configuration = self._load_active_connections(tools_configuration)
-        logger.info("Loaded active connections configuration:\n%s", connections_configuration)
+        logger.debug("Loaded active connections configuration:\n%s", connections_configuration)
 
         self._validate_workflow(
             workflow_definition,
@@ -73,31 +73,31 @@ class ApplicationContainerBuilder:
         )
 
         connection_registry = self._build_connections(connections_configuration)
-        logger.info("\n\nBuilt connection registry:\n%s", connection_registry)
+        logger.debug("Built connection registry:\n%s", connection_registry)
         model_registry = self._build_models(
             settings,
             models_configuration,
             model_references,
         )
-        logger.info("\n\nBuilt model registry:\n%s", model_registry)
+        logger.debug("Built model registry:\n%s", model_registry)
         tool_registry = self._build_tools(
             settings,
             tools_configuration,
             connection_registry,
         )
-        logger.info("\n\nBuilt tool registry:\n%s", tool_registry)
+        logger.debug("Built tool registry:\n%s", tool_registry)
         agent_registry = self._build_agents(
             agent_definitions,
             model_registry,
             tool_registry,
         )
-        logger.info("\n\nBuilt agent registry:\n%s", agent_registry)
+        logger.debug("Built agent registry:\n%s", agent_registry)
         workflow = self._build_workflow(
             workflow_definition,
             agent_definitions,
             agent_registry,
         )
-        logger.info("\n\nBuilt workflow:\n%s", workflow)
+        logger.debug("Built workflow:\n%s", workflow)
 
         logger.info("Application startup completed")
         return ApplicationContainer(
