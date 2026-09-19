@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, Any
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class BaseStage(ABC):
@@ -12,7 +12,7 @@ class BaseStage(ABC):
     """
 
     @abstractmethod
-    def invoke(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def invoke(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the stage.
 
