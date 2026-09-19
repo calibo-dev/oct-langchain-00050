@@ -43,14 +43,17 @@ class Settings(BaseSettings):
     anthropicai_api_key_secret: str = Field(alias="ANTHROPICAI_API_KEY_SECRET")
     geminiai_api_key_secret: str = Field(alias="GEMINIAI_API_KEY_SECRET")
     bedrockai_api_key_secret: str = Field(alias="BEDROCK_AI_API_KEY_SECRET")
-    ollama_base_url: str = Field(alias="OLLAMA_BASE_URL")
+    # None means unconfigured, not a default server address. The Ollama builder
+    # requires a real environment value only when an active model uses Ollama.
+    ollama_base_url: str | None = Field(default=None, alias="OLLAMA_BASE_URL")
     # Pydantic checks explicitly passed values, process environment variables,
-    # and then the project .env file. No application setting has a code default.
+    # and then the project .env file. No server address is supplied by code.
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        hide_input_in_errors=True,
     )
 
 

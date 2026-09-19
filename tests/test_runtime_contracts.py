@@ -25,9 +25,22 @@ def test_current_workflow_contracts_are_valid():
 
 
 def test_required_settings_have_no_code_defaults():
-    assert all(field.is_required() for field in Settings.model_fields.values())
+    assert all(
+        field.is_required()
+        for name, field in Settings.model_fields.items()
+        if name != "ollama_base_url"
+    )
+    assert Settings.model_fields["ollama_base_url"].default is None
     with pytest.raises(ValidationError):
         Settings.model_validate({})
+
+
+@pytest.mark.parametrize("url", [None, "", "   "])
+def test_active_ollama_requires_an_environment_url(url):
+    from latest_ai_development.models.provider_builders import build_ollama_llm
+
+    with pytest.raises(ValueError, match="OLLAMA_BASE_URL is required"):
+        build_ollama_llm(SimpleNamespace(ollama_base_url=url), "example", {})
 
 
 def test_settings_errors_are_aggregated():

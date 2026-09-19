@@ -154,6 +154,8 @@ def build_ollama_llm(
     parameters: dict[str, Any],
 ) -> Any:
     """Create a local Ollama chat model."""
+    if not settings.ollama_base_url or not settings.ollama_base_url.strip():
+        raise ValueError("OLLAMA_BASE_URL is required when an active model uses Ollama")
     model_parameters = build_model_parameters("ollama", model_name, parameters)
     return ChatOllama(**model_parameters, base_url=settings.ollama_base_url)
 

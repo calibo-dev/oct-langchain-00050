@@ -115,6 +115,7 @@ retained from the existing country workflow.
 
 Start with `.env.example`. Every field in `core/settings.py` must be supplied;
 unused provider secret names and the unused cloud-backend field may be empty.
+`OLLAMA_BASE_URL` may be omitted unless an active model uses Ollama.
 `DEBUG`, `LOG_LEVEL`, `PORT` and `CONTEXT` have no code defaults. `CONTEXT` must be
 nonblank; this runner does not automatically load retrieval files.
 
