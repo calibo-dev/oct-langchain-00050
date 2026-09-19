@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import List
-
 from langchain_core.tools import BaseTool
 
 from latest_ai_development.tools.custom_tool import search_tool
 
 
-def get_tools() -> List[BaseTool]:
+def get_tools() -> list[BaseTool]:
     """
     Return the list of tools available to the workflow.
 
