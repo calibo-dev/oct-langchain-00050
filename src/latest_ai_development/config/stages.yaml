@@ -1,145 +1,77 @@
-research:
-  system_prompt: |
-    You are a senior research analyst responsible for gathering
-    accurate and relevant information about the given topic.
+workflow:
+  name: country_data_query_workflow
+  execution: sequential
+  inputs:
+    - user_natural_language_query
 
-  instructions:
-    - Focus on factual accuracy
-    - Identify key insights
-    - Highlight risks and assumptions
-    - Provide structured research notes for downstream reporting
-
-  output_sections:
-    - Topic Overview
-    - Key Findings
-    - Important Details
-    - Risks / Assumptions
-    - Suggested Report Outline
-
-  use_tools: true
-  use_retrieval: false
-  model:
-    primary:
-      provider: OpenAI
-      modelId: gpt-4.1-mini
-      generationDefaults:
-        temperature: 0.7
-        topP: 0.7
-        maxOutputTokens: 4000
-    fallback:
-      provider: OpenAI
-      modelId: gpt-4.1-nano
-      generationDefaults:
-        temperature: 0.7
-        topP: 0.7
-        maxOutputTokens: 4000
-
-
-reporting:
-  system_prompt: |
-    You are a professional reporting analyst responsible for converting
-    research notes into a structured markdown report.
-
-  instructions:
-    - Produce a structured markdown report
-    - Avoid unsupported claims
-    - Keep the report easy to scan
-    - Use clear headings and sections
-  model:
-    primary:
-      provider: OpenAI
-      modelId: gpt-4.1-mini
-      generationDefaults:
-        temperature: 0.3
-        topP: 0.7
-        maxOutputTokens: 4000
-    fallback:
-      provider: OpenAI
-      modelId: gpt-4.1-nano
-      generationDefaults:
-        temperature: 0.3
-        topP: 0.7
-        maxOutputTokens: 4000
-
-tracing:
-  workflow:
-    enabled: true
-    name: Research Reporting Workflow
-    run_type: chain
-    tags:
-      - workflow
-      - multi-agent
-    metadata:
-      workflow_name: research_reporting
-      workflow_version: "1.0"
-    input_fields:
-      flow_run_id: flow_run_id
-      topic: inputs.topic
-      current_year: inputs.current_year
-      knowledge_context_present:
-        path: inputs.knowledge_context
-        transform: bool
-    output_fields:
-      flow_run_id: flow_run_id
-      topic: topic
-      keys:
-        path: .
-        transform: keys
-      has_report:
-        path: report
-        transform: bool
-      report_chars:
-        path: report
-        transform: len
-      research_notes_chars:
-        path: research_notes
-        transform: len
   stages:
-    research:
-      enabled: true
-      name: Research Agent Stage
-      run_type: chain
-      tags:
-        - stage
-        - research
-      metadata:
-        component_type: agent
-        agent_name: research_agent
-        stage: research
-      input_fields:
-        flow_run_id: inputs.flow_run_id
-        topic: inputs.topic
-        current_year: inputs.current_year
-        knowledge_context_present:
-          path: inputs.knowledge_context
-          transform: bool
-      output_fields:
-        topic: topic
-        research_notes_chars:
-          path: research_notes
-          transform: len
-    reporting:
-      enabled: true
-      name: Reporting Stage
-      run_type: chain
-      tags:
-        - stage
-        - reporting
-      metadata:
-        component_type: chain
-        stage: reporting
-      input_fields:
-        flow_run_id: inputs.flow_run_id
-        topic: inputs.topic
-        current_year: inputs.current_year
-        research_notes_present:
-          path: inputs.research_notes
-          transform: bool
-        research_notes_chars:
-          path: inputs.research_notes
-          transform: len
-      output_fields:
-        topic: topic
-        report_chars:
-          path: report
-          transform: len
+    - name: fetch_metadata
+      execution: sequential
+      agents:
+        - metadata_fetching_agent
+      inputs:
+        - user_natural_language_query
+      outputs:
+        - country_table_metadata
+
+    - name: generate_query
+      execution: sequential
+      depends_on:
+        - fetch_metadata
+      agents:
+        - query_generator_agent
+      inputs:
+        - user_natural_language_query
+        - country_table_metadata
+      outputs:
+        - generated_query
+
+    - name: validate_query
+      execution: sequential
+      depends_on:
+        - generate_query
+      agents:
+        - validate_query_agent
+      inputs:
+        - user_natural_language_query
+        - country_table_metadata
+        - generated_query
+      outputs:
+        - query_validation_status
+        - validated_query
+        - query_validation_message
+
+    - name: execute_query
+      execution: sequential
+      depends_on:
+        - validate_query
+      agents:
+        - query_execution_agent
+      inputs:
+        - query_validation_status
+        - validated_query
+        - query_validation_message
+      outputs:
+        - query_execution_status
+        - query_results
+        - query_execution_error
+
+    - name: generate_response
+      execution: sequential
+      depends_on:
+        - execute_query
+      agents:
+        - response_generator_agent
+      inputs:
+        - user_natural_language_query
+        - validated_query
+        - query_validation_status
+        - query_validation_message
+        - query_execution_status
+        - query_results
+        - query_execution_error
+      outputs:
+        - request
+        - query
+        - status
+        - response

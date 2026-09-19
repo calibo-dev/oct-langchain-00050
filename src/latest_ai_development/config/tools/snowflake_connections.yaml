@@ -1,0 +1,20 @@
+connections:
+  - name: snowflake
+    account: HJGNKCC-EA00444
+    host: HJGNKCC-EA00444.snowflakecomputing.com
+    warehouse: COUNTRY_TOOL_WH
+    database: COUNTRY_DATA_DB
+    schema: REFERENCE
+    user: COUNTRY_TOOL_SVC
+    role: COUNTRY_DATA_READ_ROLE
+
+    # These are environment-variable names, not PAT values. At runtime,
+    # populate exactly one variable: directPatToken or secret.
+    authentication:
+      directPatToken: SNOWFLAKE_SHARED_DEV_PAT_TOKEN
+      secret: SNOWFLAKE_SHARED_DEV_PAT_SECRET_NAME
+
+    connectionOptions:
+      clientSessionKeepAlive: true
+      loginTimeout: 30
+      networkTimeout: 60

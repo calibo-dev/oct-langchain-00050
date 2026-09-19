@@ -1,17 +1,19 @@
-import os
-import boto3
 import json
-from botocore.exceptions import ClientError
-from azure.identity import DefaultAzureCredential
-from azure.keyvault.secrets import SecretClient
+import os
+
+import boto3
 from azure.core.exceptions import (
-    ResourceNotFoundError,
     ClientAuthenticationError,
     HttpResponseError,
+    ResourceNotFoundError,
 )
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 class AWSSecretsManager:
     def __init__(self):
@@ -22,10 +24,7 @@ class AWSSecretsManager:
         """
         region_name = os.environ.get("AWS_REGION", "us-east-1")
         self.session = boto3.session.Session()
-        self.client = self.session.client(
-            service_name='secretsmanager',
-            region_name=region_name
-        )
+        self.client = self.session.client(service_name="secretsmanager", region_name=region_name)
 
     def get_aws_secret(self, secret_name: str, secret_key: str = None):
         """
@@ -34,16 +33,14 @@ class AWSSecretsManager:
         :param secret_key: The key of the secret to retrieve from the JSON object. If None, returns the entire secret string.
         """
         try:
-            get_secret_value_response = self.client.get_secret_value(
-                SecretId=secret_name
-            )
+            get_secret_value_response = self.client.get_secret_value(SecretId=secret_name)
         except ClientError as e:
             # For a list of exceptions thrown, see
             # https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
             raise e
 
         # Decrypts secret using the associated KMS key.
-        secret = get_secret_value_response['SecretString']
+        secret = get_secret_value_response["SecretString"]
 
         if secret_key:
             secret_dict = json.loads(secret)
@@ -60,13 +57,11 @@ class AzureKeyVaultSecretsManager:
         key_vault_url = os.getenv("AZURE_KEY_VAULT_URL")
 
         if not key_vault_url:
-            raise ValueError(
-                "AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE."
-            )
+            raise ValueError("AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE.")
 
         self.client = SecretClient(
             vault_url=key_vault_url,
-            credential=DefaultAzureCredential(additionally_allowed_tenants=["*"])
+            credential=DefaultAzureCredential(additionally_allowed_tenants=["*"]),
         )
 
     def get_azure_secret(self, secret_name: str, secret_key: str = None):
@@ -91,6 +86,7 @@ class AzureKeyVaultSecretsManager:
             secret_dict = json.loads(secret)
             return secret_dict.get(secret_key)
         return secret
+
 
 class SecretsManager:
     def __init__(self):

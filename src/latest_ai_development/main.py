@@ -1,137 +1,18 @@
+"""Application entrypoint used by uvicorn and the local CLI command."""
+
 from __future__ import annotations
 
-import logging
-from contextlib import asynccontextmanager
-from datetime import datetime
-from uuid import uuid4
+from latest_ai_development.application import create_app
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
-from latest_ai_development.config.settings import get_settings
-from latest_ai_development.config.validators import validate_configuration
-from latest_ai_development.logging_utils import configure_logging
-from latest_ai_development.tracing import initialize_langsmith_tracing
-from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
-
-# Load settings
-settings = get_settings()
-configure_logging(getattr(settings, "log_level", "INFO"))
-logger = logging.getLogger(__name__)
-
-# Validate configuration at startup
-try:
-    validate_configuration()
-except Exception:
-    logger.exception("Startup configuration validation failed")
-    raise
-
-# Initialize workflow controller
-try:
-    workflow = LatestAiDevelopmentWorkflow()
-except Exception:
-    logger.exception("Workflow initialization failed")
-    raise
-
-API_ROOT_PATH = settings.normalized_api_root_path
+# Uvicorn imports this module-level variable when the server starts.
+app = create_app()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    initialize_langsmith_tracing()
-    yield
-
-
-# Initialize FastAPI application
-app = FastAPI(
-    title=settings.app_name,
-    version="0.1.0",
-    description="LangChain workflow for automated research and report generation",
-    root_path=API_ROOT_PATH,
-    lifespan=lifespan,
-)
-
-
-class AskRequest(BaseModel):
-    topic: str
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    """
-    Health check endpoint.
-    """
-    return {"status": "ok"}
-
-
-@app.post("/ask")
-def ask(request: AskRequest) -> dict[str, str]:
-    """
-    Execute the research + reporting workflow.
-    """
-    flow_run_id = uuid4().hex[:12]
-
-    logger.info(
-        "Request started | flow_run_id=%s | topic=%s",
-        flow_run_id,
-        request.topic,
-    )
-
-    inputs = {
-        "topic": request.topic,
-        "current_year": datetime.now().year,
-        "knowledge_context": "",
-    }
-
-    try:
-        try:
-            result = workflow.kickoff(inputs, flow_run_id=flow_run_id)
-        except TypeError as exc:
-            if "unexpected keyword argument 'flow_run_id'" not in str(exc):
-                raise
-            result = workflow.kickoff(inputs)
-    except Exception as exc:
-        logger.exception(
-            "Request failed | flow_run_id=%s | topic=%s",
-            flow_run_id,
-            request.topic,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Workflow execution failed. flow_run_id={flow_run_id}",
-        ) from exc
-
-    logger.info(
-        "Request completed | flow_run_id=%s | topic=%s",
-        flow_run_id,
-        request.topic,
-    )
-
-    return {
-        "topic": result.get("topic"),
-        "report": result.get("report"),
-    }
-
-
-if API_ROOT_PATH:
-    app.add_api_route(
-        f"{API_ROOT_PATH}/health",
-        health,
-        methods=["GET"],
-        include_in_schema=False,
-    )
-    app.add_api_route(
-        f"{API_ROOT_PATH}/ask",
-        ask,
-        methods=["POST"],
-        include_in_schema=False,
-    )
-
-
-# CLI-compatible entrypoint
 def run() -> None:
+    """Run the FastAPI app using settings loaded during startup."""
     import uvicorn
 
+    settings = app.state.settings
     uvicorn.run(
         "latest_ai_development.main:app",
         host=settings.api_host,

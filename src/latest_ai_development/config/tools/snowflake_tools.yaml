@@ -1,0 +1,21 @@
+tools:
+  - name: country_data_agentic_tool
+    connector: snowflake
+    displayName: Country Data Agentic Tool
+    connectionName: snowflake
+    description: Provides controlled read-only access to configured Snowflake country data.
+    purpose: Execute Snowflake queries and return data required for downstream analysis and response generation.
+    tags:
+      - snowflake
+      - country-data
+    usageGuidelines:
+      - Use this tool only for the configured Snowflake database and schema.
+      - Discover metadata before querying when the required table structure is unknown.
+      - Support filtering, sorting, DISTINCT, grouping, counting, and aggregation.
+      - Always reference tables using fully qualified Snowflake object names.
+      - Use COUNTRY_DATA_DB.REFERENCE.AK_COUNTRY for country-data queries.
+      - Use COUNTRY_DATA_DB.INFORMATION_SCHEMA.COLUMNS for column discovery.
+    nonUsageGuidelines:
+      - Do not access data outside the configured Snowflake database and schema.
+      - Do not execute INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER, DROP, GRANT, or REVOKE.
+      - Do not fabricate or infer values when requested data is unavailable.
