@@ -233,6 +233,28 @@ class LatestAiDevelopmentWorkflow:
                 {"messages": [{"role": "user", "content": prompt}]},
                 config=agent_config,
             )
+            # A model's final prose is not proof that an external operation ran.
+            # Require an actual tool response before accepting configured outputs.
+            condition = definition.required_tool_when
+            if condition is not None and all(
+                values.get(name) == expected for name, expected in condition.items()
+            ):
+                messages = result.get("messages", []) if isinstance(result, Mapping) else []
+                tool_executed = False
+                for message in messages:
+                    if isinstance(message, Mapping):
+                        message_type = message.get("type") or message.get("role")
+                        tool_name = message.get("name")
+                    else:
+                        message_type = getattr(message, "type", None)
+                        tool_name = getattr(message, "name", None)
+                    if message_type == "tool" and tool_name in definition.tools:
+                        tool_executed = True
+                        break
+                if not tool_executed:
+                    raise ValueError(
+                        "required tool execution is missing; refusing unverified output"
+                    )
             response_text = extract_response_text(result)
             return extract_agent_outputs(definition, response_text)
         except Exception as exc:

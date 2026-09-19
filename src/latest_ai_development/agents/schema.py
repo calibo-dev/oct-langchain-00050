@@ -26,12 +26,26 @@ class AgentDefinition(BaseModel):
     inputs: list[str] = Field(min_length=1)
     outputs: list[str] = Field(min_length=1)
     tools: list[str] = Field(default_factory=list)
+    # None means optional tool use; {} requires it on every invocation.
+    # Otherwise every configured input/value pair must match to require a call.
+    required_tool_when: dict[str, str] | None = None
     system_prompt: str = Field(min_length=1)
 
     @property
     def primary_model(self) -> AgentModel:
         """The first model in YAML is the agent's preferred model."""
         return self.model[0]
+
+    @model_validator(mode="after")
+    def validate_tool_requirement(self) -> AgentDefinition:
+        """Reject tool requirements that cannot be satisfied by this agent."""
+        if self.required_tool_when is not None:
+            if not self.tools:
+                raise ValueError("required_tool_when requires at least one configured tool")
+            unknown = set(self.required_tool_when) - set(self.inputs)
+            if unknown:
+                raise ValueError(f"required_tool_when references unknown inputs: {sorted(unknown)}")
+        return self
 
     @field_validator("inputs", "outputs", "tools")
     @classmethod

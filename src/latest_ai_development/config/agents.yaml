@@ -1,5 +1,6 @@
 agents:
   - name: metadata_fetching_agent
+    required_tool_when: {}
     model:
       - provider: OpenAI
         modelId: gpt-4.1
@@ -96,6 +97,8 @@ agents:
       - query_validation_message
 
   - name: query_execution_agent
+    required_tool_when:
+      query_validation_status: valid
     model:
       - provider: OpenAI
         modelId: gpt-4.1

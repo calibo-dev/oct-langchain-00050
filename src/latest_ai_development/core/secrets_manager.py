@@ -1,3 +1,5 @@
+"""Resolve provider credentials through the configured cloud secret backend."""
+
 import json
 import os
 
@@ -9,7 +11,6 @@ from azure.core.exceptions import (
 )
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
-from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,9 +21,11 @@ class AWSSecretsManager:
         """
         Initializes the AWSSecretsManager with a boto3 client.
         The AWS region is retrieved from the 'AWS_REGION' environment variable,
-        defaulting to 'us-east-1' if not set.
+        and must be explicitly configured.
         """
-        region_name = os.environ.get("AWS_REGION", "us-east-1")
+        region_name = os.environ.get("AWS_REGION", "").strip()
+        if not region_name:
+            raise ValueError("AWS_REGION is required when CLOUD_PROVIDER is AWS.")
         self.session = boto3.session.Session()
         self.client = self.session.client(service_name="secretsmanager", region_name=region_name)
 
@@ -32,12 +35,7 @@ class AWSSecretsManager:
         :param secret_name: The name of the secret in AWS Secrets Manager.
         :param secret_key: Optional key to retrieve when the secret contains JSON.
         """
-        try:
-            get_secret_value_response = self.client.get_secret_value(SecretId=secret_name)
-        except ClientError as e:
-            # For a list of exceptions thrown, see
-            # https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
-            raise e
+        get_secret_value_response = self.client.get_secret_value(SecretId=secret_name)
 
         # Decrypts secret using the associated KMS key.
         secret = get_secret_value_response["SecretString"]
