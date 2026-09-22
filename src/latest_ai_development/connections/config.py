@@ -7,9 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from latest_ai_development.connections.schema import ConnectionConfigurations
-from latest_ai_development.connections.validator import (
-    validate_connections_configuration,
-)
 from latest_ai_development.core.settings import CONFIG_DIR, load_yaml_file
 from latest_ai_development.tools.discovery import discover_connectors, get_connector
 
@@ -38,10 +35,7 @@ def load_connections_configuration(
                 config_path=config_path,
             )
 
-        configurations[connector] = validate_connections_configuration(
-            connector,
-            raw_configuration,
-        )
+        configurations[connector] = get_connector(connector).validate_connections(raw_configuration)
 
     return configurations
 
