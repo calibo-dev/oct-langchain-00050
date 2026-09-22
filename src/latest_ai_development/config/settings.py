@@ -65,11 +65,11 @@ class Settings(BaseSettings):
     geminiai_api_key_secret: str = Field(default="", alias="GEMINIAI_API_KEY_SECRET")
 
     # Bedrock
-    bedrockai_api_key_secret: str = Field(default="", alias="BEDROCKAI_API_KEY_SECRET")
+    bedrock_ai_api_key_secret: str = Field(default="", alias="BEDROCK_AI_API_KEY_SECRET")
 
     # Microsoft Foundry AI
-    microsoftfoundryai_endpoint: str = Field(default="", alias="MICROSOFTFOUNDRYAI_ENDPOINT")
-    microsoftfoundryai_api_key_secret: str = Field(default="", alias="MICROSOFTFOUNDRYAI_API_KEY_SECRET")
+    microsoft_foundry_ai_endpoint: str = Field(default="", alias="MICROSOFT_FOUNDRY_AI_ENDPOINT")
+    microsoft_foundry_ai_api_key_secret: str = Field(default="", alias="MICROSOFT_FOUNDRY_AI_API_KEY_SECRET")
 
     # Secret Manager
     cloud_provider: str = Field(default="", alias="CLOUD_PROVIDER")

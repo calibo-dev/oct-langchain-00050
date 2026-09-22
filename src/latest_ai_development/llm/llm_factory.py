@@ -118,12 +118,12 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
 
     if provider == "bedrockai":
 
-        api_key = resolve_api_key(getattr(settings, "bedrockai_api_key_secret", ""))
+        api_key = resolve_api_key(getattr(settings, "bedrock_ai_api_key_secret", ""))
 
         if not api_key:
             raise ValueError(
                 "BedrockAI API key not found. "
-                "Set BEDROCKAI_API_KEY_SECRET."
+                "Set BEDROCK_AI_API_KEY_SECRET."
             )
         try:
             from langchain_aws import ChatBedrockConverse
@@ -140,21 +140,21 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
 
     if provider == "microsoftfoundryai":
 
-        endpoint = getattr(settings, "microsoftfoundryai_endpoint", "")
+        endpoint = getattr(settings, "microsoft_foundry_ai_endpoint", "")
         api_key = resolve_api_key(
-            getattr(settings, "microsoftfoundryai_api_key_secret", "")
+            getattr(settings, "microsoft_foundry_ai_api_key_secret", "")
         )
         if not endpoint:
             raise ValueError(
-                "Microsoft Foundry AI endpoint not found. Set MICROSOFTFOUNDRYAI_ENDPOINT."
+                "Microsoft Foundry AI endpoint not found. Set MICROSOFT_FOUNDRY_AI_ENDPOINT."
             )
 
         if not api_key:
             raise ValueError(
-                "Microsoft Foundry AI API key not found. Set MICROSOFTFOUNDRYAI_API_KEY_SECRET."
+                "Microsoft Foundry AI API key not found. Set MICROSOFT_FOUNDRY_AI_API_KEY_SECRET."
             )
 
-        route, base_url = _microsoftfoundryai_route(endpoint)
+        route, base_url = _microsoft_foundry_ai_route(endpoint)
 
         if route == "anthropic":
             try:
@@ -198,14 +198,14 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
     )
 
 
-def _microsoftfoundryai_route(endpoint: str) -> tuple[str, str]:
+def _microsoft_foundry_ai_route(endpoint: str) -> tuple[str, str]:
     endpoint_lower = endpoint.lower()
     if endpoint_lower.endswith("/anthropic"):
         return "anthropic", endpoint
     if endpoint_lower.endswith("/openai"):
         return "openai", f"{endpoint}/v1/"
     raise ValueError(
-        "MICROSOFTFOUNDRYAI_ENDPOINT must end with /anthropic or /openai."
+        "MICROSOFT_FOUNDRY_AI_ENDPOINT must end with /anthropic or /openai."
     )
 
 def get_llm_candidates(model_config: dict[str, Any]) -> list[Any]:

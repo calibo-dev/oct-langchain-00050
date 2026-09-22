@@ -272,13 +272,13 @@ The system uses environment variables to resolve runtime configuration.
 - **`GEMINIAI_API_KEY_SECRET`**
   - **Purpose**: Secret name used to resolve the Gemini API key from the configured secret manager
 
-- **`BEDROCKAI_API_KEY_SECRET`**
+- **`BEDROCK_AI_API_KEY_SECRET`**
   - **Purpose**: Secret name used to resolve the AWS Bedrock API key from the configured secret manager
 
-- **`MICROSOFTFOUNDRYAI_API_KEY_SECRET`**
+- **`MICROSOFT_FOUNDRY_AI_API_KEY_SECRET`**
   - **Purpose**: Secret name used to resolve the Microsoft Foundry AI API key from the configured secret manager
 
-- **`MICROSOFTFOUNDRYAI_ENDPOINT`**
+- **`MICROSOFT_FOUNDRY_AI_ENDPOINT`**
   - **Purpose**: Specifies the MICROSOFT FOUNDRY AI provider base endpoint
 
 - **`CLOUD_PROVIDER`**
