@@ -1,77 +1,146 @@
 workflow:
-  name: country_data_query_workflow
+  name: hospital_management_query_workflow
   execution: sequential
   inputs:
-    - user_natural_language_query
+    - user_query
 
   stages:
-    - name: fetch_metadata
+    - name: validate_hospital_query
       execution: sequential
       agents:
-        - metadata_fetching_agent
+        - hospital_query_intent_agent
       inputs:
-        - user_natural_language_query
+        - user_query
       outputs:
-        - country_table_metadata
+        - is_hospital_query
+        - query_intent
+        - normalized_query
+        - rejection_response
 
-    - name: generate_query
+    - name: discover_hospital_metadata
       execution: sequential
       depends_on:
-        - fetch_metadata
+        - validate_hospital_query
       agents:
-        - query_generator_agent
+        - hospital_metadata_discovery_agent
       inputs:
-        - user_natural_language_query
-        - country_table_metadata
+        - is_hospital_query
+        - normalized_query
+        - rejection_response
       outputs:
-        - generated_query
+        - metadata_status
+        - relevant_tables
+        - relevant_columns
+        - relationship_metadata
+        - metadata_error
 
-    - name: validate_query
+    - name: plan_hospital_query
       execution: sequential
       depends_on:
-        - generate_query
+        - discover_hospital_metadata
       agents:
-        - validate_query_agent
+        - hospital_query_planning_agent
       inputs:
-        - user_natural_language_query
-        - country_table_metadata
-        - generated_query
+        - is_hospital_query
+        - normalized_query
+        - metadata_status
+        - relevant_tables
+        - relevant_columns
+        - relationship_metadata
+        - metadata_error
       outputs:
-        - query_validation_status
-        - validated_query
-        - query_validation_message
+        - planning_status
+        - query_plan
+        - required_tables
+        - join_plan
+        - filter_plan
+        - aggregation_plan
+        - result_limit
+        - planning_error
 
-    - name: execute_query
+    - name: generate_hospital_sql
       execution: sequential
       depends_on:
-        - validate_query
+        - plan_hospital_query
       agents:
-        - query_execution_agent
+        - hospital_sql_generation_agent
       inputs:
-        - query_validation_status
-        - validated_query
-        - query_validation_message
+        - normalized_query
+        - planning_status
+        - query_plan
+        - required_tables
+        - join_plan
+        - filter_plan
+        - aggregation_plan
+        - result_limit
+        - relevant_columns
+        - relationship_metadata
       outputs:
-        - query_execution_status
+        - sql_generation_status
+        - generated_sql
+        - sql_explanation
+        - sql_generation_error
+
+    - name: validate_hospital_sql
+      execution: sequential
+      depends_on:
+        - generate_hospital_sql
+      agents:
+        - hospital_sql_validation_agent
+      inputs:
+        - normalized_query
+        - sql_generation_status
+        - generated_sql
+        - query_plan
+        - relevant_tables
+        - relevant_columns
+        - relationship_metadata
+      outputs:
+        - validation_status
+        - validated_sql
+        - validation_issues
+        - validation_feedback
+
+    - name: execute_hospital_query
+      execution: sequential
+      depends_on:
+        - validate_hospital_sql
+      agents:
+        - hospital_query_execution_agent
+      inputs:
+        - validation_status
+        - validated_sql
+        - normalized_query
+      outputs:
+        - execution_status
         - query_results
-        - query_execution_error
+        - result_columns
+        - row_count
+        - execution_error
 
-    - name: generate_response
+    - name: generate_hospital_response
       execution: sequential
       depends_on:
-        - execute_query
+        - execute_hospital_query
       agents:
-        - response_generator_agent
+        - hospital_response_generation_agent
       inputs:
-        - user_natural_language_query
-        - validated_query
-        - query_validation_status
-        - query_validation_message
-        - query_execution_status
+        - user_query
+        - is_hospital_query
+        - query_intent
+        - rejection_response
+        - normalized_query
+        - generated_sql
+        - validation_status
+        - validation_issues
+        - execution_status
         - query_results
-        - query_execution_error
+        - result_columns
+        - row_count
+        - execution_error
       outputs:
         - request
-        - query
-        - status
-        - response
+        - response_status
+        - answer
+        - data_summary
+        - sql_query

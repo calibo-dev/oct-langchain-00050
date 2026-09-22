@@ -1,21 +1,33 @@
 tools:
-  - name: country_data_agentic_tool
+  - name: hospital_management_agentic_tool
     connector: snowflake
-    displayName: Country Data Agentic Tool
-    connectionName: snowflake
-    description: Provides controlled read-only access to configured Snowflake country data.
-    purpose: Execute Snowflake queries and return data required for downstream analysis and response generation.
+    displayName: Hospital Management Agentic Tool
+    connectionName: hospital_management_connection
+    description: Provides controlled read-only access to hospital data and metadata in the configured Snowflake database and schema.
+    purpose: Retrieve hospital records, discover database structures, and execute read-only analytical queries for downstream response generation.
     tags:
       - snowflake
-      - country-data
+      - hospital-management
+      - healthcare-data
+      - read-only
+
     usageGuidelines:
-      - Use this tool only for the configured Snowflake database and schema.
-      - Discover metadata before querying when the required table structure is unknown.
-      - Support filtering, sorting, DISTINCT, grouping, counting, and aggregation.
-      - Always reference tables using fully qualified Snowflake object names.
-      - Use COUNTRY_DATA_DB.REFERENCE.AK_COUNTRY for country-data queries.
-      - Use COUNTRY_DATA_DB.INFORMATION_SCHEMA.COLUMNS for column discovery.
+      - Use this tool for hospital-related data retrieval and analysis only.
+      - Access all tables and views available in HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA.
+      - Discover tables, views, columns, and data types before querying when the structure is unknown.
+      - Use HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA for metadata discovery.
+      - Use SHOW and DESCRIBE commands when detailed object structure is required.
+      - Always reference tables and views using fully qualified Snowflake object names.
+      - Execute read-only SELECT and WITH queries against hospital data.
+      - Support joins, filtering, sorting, DISTINCT, grouping, aggregation, subqueries, CTEs, and window functions.
+      - Apply an appropriate LIMIT when the user does not request the complete result set.
+      - Return only information supported by the retrieved database records.
+
     nonUsageGuidelines:
-      - Do not access data outside the configured Snowflake database and schema.
-      - Do not execute INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER, DROP, GRANT, or REVOKE.
-      - Do not fabricate or infer values when requested data is unavailable.
+      - Do not access databases other than HOSPITAL_MANAGEMENT_DB.
+      - Do not access schemas outside HOSPITAL_MANAGEMENT_SCHEMA, except HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA for metadata discovery.
+      - Do not execute INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER, DROP, GRANT, REVOKE, CALL, PUT, GET, COPY, or REMOVE.
+      - Do not modify database objects, permissions, users, roles, warehouses, or connections.
+      - Do not invoke stored procedures, user-defined functions, or external functions that can modify data or trigger external actions.
+      - Do not fabricate, assume, or infer hospital values when the requested data is unavailable.
+      - Do not expose authentication credentials, connection secrets, access tokens, or internal configuration.

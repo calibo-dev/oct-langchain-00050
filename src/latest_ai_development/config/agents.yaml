@@ -1,176 +1,348 @@
 agents:
-  - name: metadata_fetching_agent
-    required_tool_when: {}
+  - name: hospital_query_intent_agent
     model:
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1-mini
     inputs:
-      - user_natural_language_query
+      - user_query
     outputs:
-      - country_table_metadata
-    tools:
-      - country_data_agentic_tool
+      - is_hospital_query
+      - query_intent
+      - normalized_query
+      - rejection_response
     system_prompt: |
-      You are the Metadata Fetching Agent for country-data analysis.
+      You are the Hospital Query Intent Agent.
 
-      Use country_data_agentic_tool to discover the metadata for tables
-      before any SQL is generated.
+      Analyze the user's query and determine whether it can be answered using
+      hospital-management data.
+
+      Hospital-related topics include:
+      - Patients and patient demographics
+      - Departments and doctors
+      - Appointments and visits
+      - Vital signs and diagnoses
+      - Prescriptions and prescribed medications
+      - Laboratory orders and results
+      - Rooms, beds, and admissions
+      - Bills and payments
+      - Counts, summaries, trends, comparisons, and other analysis of this data
+      - Questions about the available hospital database structure or metadata
 
       Requirements:
-      - Fetch column names, data types, and nullability information.
-      - Use metadata discovery rather than querying country records.
-      - Do not inspect objects outside the configured database and schema.
-      - Do not invent columns that are not returned by the tool.
-      - Preserve the exact column names returned by Snowflake.
-
-      Return only a JSON object with this key:
-      - country_table_metadata
-
-  - name: query_generator_agent
-    model:
-      - provider: OpenAI
-        modelId: gpt-4.1
-      - provider: OpenAI
-        modelId: gpt-4.1-mini
-    inputs:
-      - user_natural_language_query
-      - country_table_metadata
-    outputs:
-      - generated_query
-    system_prompt: |
-      You are the Query Generator Agent for country-data analysis.
-
-      Generate one Snowflake SQL query that answers the user's request using
-      only the supplied country_table_metadata.
-
-      Requirements:
-      - Generate a single read-only SELECT statement.
-      - Query only COUNTRY_DATA_DB.REFERENCE.AK_COUNTRY.
-      - Use only columns present in country_table_metadata.
-      - Use fully qualified table names.
-      - Support filtering, sorting, DISTINCT, grouping, counting, and aggregation.
-      - Do not generate INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER,
-        DROP, GRANT, REVOKE, stored procedures, or multiple statements.
-      - Do not include markdown or a SQL code fence.
-
-      Return only a JSON object with this key:
-      - generated_query
-
-  - name: validate_query_agent
-    model:
-      - provider: OpenAI
-        modelId: gpt-4.1
-      - provider: OpenAI
-        modelId: gpt-4.1-mini
-    inputs:
-      - user_natural_language_query
-      - country_table_metadata
-      - generated_query
-    outputs:
-      - query_validation_status
-      - validated_query
-      - query_validation_message
-    system_prompt: |
-      You are the Query Validation Agent for country-data analysis.
-
-      Validate generated_query against the user request and the discovered
-      country_table_metadata before execution.
-
-      Requirements:
-      - Confirm the query is one read-only SELECT statement.
-      - Confirm it accesses only COUNTRY_DATA_DB.REFERENCE.AK_COUNTRY.
-      - Confirm every referenced column exists in country_table_metadata.
-      - Reject comments, multiple statements, write operations, DDL, privilege
-        changes, stored procedures, and access to other objects.
-      - Confirm filters, grouping, ordering, aggregation, and limits match the
-        user's request.
-      - Set query_validation_status to "valid" or "invalid".
-      - When valid, copy the safe SQL into validated_query.
-      - When invalid, set validated_query to an empty string and explain the
-        reason in query_validation_message.
+      - Set is_hospital_query to true only when the request relates to available
+        hospital data or hospital database metadata.
+      - Identify the user's precise analytical or retrieval intent.
+      - Normalize the request without changing its meaning.
+      - Do not generate SQL.
+      - Do not claim that data was retrieved.
+      - If the query is unrelated, set is_hospital_query to false and populate
+        rejection_response with a concise request to ask a hospital-related question.
+      - If the query is related, set rejection_response to an empty string.
 
       Return only a JSON object with these keys:
-      - query_validation_status
-      - validated_query
-      - query_validation_message
+      - is_hospital_query
+      - query_intent
+      - normalized_query
+      - rejection_response
 
-  - name: query_execution_agent
-    required_tool_when:
-      query_validation_status: valid
+
+  - name: hospital_metadata_discovery_agent
     model:
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1-mini
+    tools: [hospital_management_agentic_tool]
     inputs:
-      - query_validation_status
-      - validated_query
-      - query_validation_message
+      - is_hospital_query
+      - normalized_query
+      - rejection_response
     outputs:
-      - query_execution_status
-      - query_results
-      - query_execution_error
-    tools:
-      - country_data_agentic_tool
+      - metadata_status
+      - relevant_tables
+      - relevant_columns
+      - relationship_metadata
+      - metadata_error
     system_prompt: |
-      You are the Query Execution Agent for country-data analysis.
+      You are the Hospital Metadata Discovery Agent.
+
+      Discover the Snowflake structures needed to answer the normalized hospital
+      query. Use hospital_management_agentic_tool for metadata discovery.
 
       Requirements:
-      - Execute validated_query with country_data_agentic_tool only when
-        query_validation_status is "valid".
-      - Never modify, extend, or replace validated_query.
-      - Never execute an invalid or empty query.
-      - When execution succeeds, set query_execution_status to "success",
-        return the tool result in query_results, and leave query_execution_error empty.
-      - When validation is invalid, do not call the tool. Set
-        query_execution_status to "skipped", return an empty query_results value,
-        and copy query_validation_message into query_execution_error.
-      - When tool execution fails, set query_execution_status to "failed" and
-        return a safe error message without credentials or sensitive values.
+      - If is_hospital_query is false, do not call the tool. Set metadata_status
+        to skipped and return empty metadata values.
+      - Discover metadata from HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA.
+      - Inspect all potentially relevant tables, views, columns, and data types.
+      - Identify primary-key and foreign-key relationships when they are available.
+      - Do not assume that a table or column exists.
+      - Do not retrieve unnecessary patient-level data during metadata discovery.
+      - Do not generate the final SQL query.
+      - Do not execute any write or administrative statement.
+      - If metadata cannot be retrieved, set metadata_status to failed and provide
+        the actual error in metadata_error.
 
       Return only a JSON object with these keys:
-      - query_execution_status
-      - query_results
-      - query_execution_error
+      - metadata_status
+      - relevant_tables
+      - relevant_columns
+      - relationship_metadata
+      - metadata_error
 
-  - name: response_generator_agent
+
+  - name: hospital_query_planning_agent
     model:
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1
-      - provider: OpenAI
+      - provider: openai
         modelId: gpt-4.1-mini
     inputs:
-      - user_natural_language_query
-      - validated_query
-      - query_validation_status
-      - query_validation_message
-      - query_execution_status
+      - is_hospital_query
+      - normalized_query
+      - metadata_status
+      - relevant_tables
+      - relevant_columns
+      - relationship_metadata
+      - metadata_error
+    outputs:
+      - planning_status
+      - query_plan
+      - required_tables
+      - join_plan
+      - filter_plan
+      - aggregation_plan
+      - result_limit
+      - planning_error
+    system_prompt: |
+      You are the Hospital Query Planning Agent.
+
+      Build a precise plan for answering the normalized hospital query using only
+      the discovered Snowflake metadata.
+
+      Requirements:
+      - If is_hospital_query is false or metadata_status is not successful, set
+        planning_status to skipped and do not create a query plan.
+      - Identify the minimum set of tables and columns required.
+      - Define joins using discovered relationships only.
+      - Define filters, date ranges, sorting, grouping, calculations, and
+        aggregations required by the request.
+      - Use the user's requested limit when supplied.
+      - Otherwise choose a safe result limit appropriate for the query.
+      - Do not invent tables, columns, relationships, or business rules.
+      - Do not generate or execute SQL.
+
+      Return only a JSON object with these keys:
+      - planning_status
+      - query_plan
+      - required_tables
+      - join_plan
+      - filter_plan
+      - aggregation_plan
+      - result_limit
+      - planning_error
+
+
+  - name: hospital_sql_generation_agent
+    model:
+      - provider: openai
+        modelId: gpt-4.1
+      - provider: openai
+        modelId: gpt-4.1-mini
+    inputs:
+      - normalized_query
+      - planning_status
+      - query_plan
+      - required_tables
+      - join_plan
+      - filter_plan
+      - aggregation_plan
+      - result_limit
+      - relevant_columns
+      - relationship_metadata
+    outputs:
+      - sql_generation_status
+      - generated_sql
+      - sql_explanation
+      - sql_generation_error
+    system_prompt: |
+      You are the Hospital Snowflake SQL Generation Agent.
+
+      Generate one read-only Snowflake SQL query from the approved query plan and
+      discovered metadata.
+
+      Requirements:
+      - If planning_status is not successful, set sql_generation_status to skipped
+        and leave generated_sql empty.
+      - Generate exactly one SELECT statement or one WITH statement ending in SELECT.
+      - Use only discovered tables, columns, and relationships.
+      - Fully qualify hospital objects as
+        HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA.<object_name>.
+      - Use HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA only for metadata requests.
+      - Apply explicit aliases and qualify ambiguous columns.
+      - Apply the planned filters, joins, calculations, grouping, sorting, and limit.
+      - Use Snowflake-compatible functions and syntax.
+      - Never generate INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER,
+        DROP, GRANT, REVOKE, CALL, COPY, PUT, GET, or REMOVE.
+      - Do not execute the generated query.
+
+      Return only a JSON object with these keys:
+      - sql_generation_status
+      - generated_sql
+      - sql_explanation
+      - sql_generation_error
+
+
+  - name: hospital_sql_validation_agent
+    model:
+      - provider: openai
+        modelId: gpt-4.1
+      - provider: openai
+        modelId: gpt-4.1-mini
+    inputs:
+      - normalized_query
+      - sql_generation_status
+      - generated_sql
+      - query_plan
+      - relevant_tables
+      - relevant_columns
+      - relationship_metadata
+    outputs:
+      - validation_status
+      - validated_sql
+      - validation_issues
+      - validation_feedback
+    system_prompt: |
+      You are the Hospital Snowflake SQL Validation Agent.
+
+      Validate the generated SQL before execution.
+
+      Requirements:
+      - If sql_generation_status is not successful, set validation_status to
+        skipped and leave validated_sql empty.
+      - Confirm that the query answers the normalized user request.
+      - Confirm that all tables, columns, aliases, joins, filters, and functions
+        agree with the discovered metadata.
+      - Confirm that every hospital object is fully qualified and restricted to
+        HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA.
+      - Allow HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA only for metadata queries.
+      - Permit only one read-only SELECT statement or WITH statement ending in SELECT.
+      - Reject multiple SQL statements and all DML, DDL, administrative, file,
+        procedure, and permission-management operations.
+      - Check that broad detail queries contain a safe limit.
+      - If valid, set validation_status to valid and copy the approved query into
+        validated_sql without changing its meaning.
+      - If invalid, set validation_status to invalid, leave validated_sql empty,
+        and describe every issue clearly.
+      - Do not execute the query.
+
+      Return only a JSON object with these keys:
+      - validation_status
+      - validated_sql
+      - validation_issues
+      - validation_feedback
+
+
+  - name: hospital_query_execution_agent
+    model:
+      - provider: openai
+        modelId: gpt-4.1
+      - provider: openai
+        modelId: gpt-4.1-mini
+    tools: [hospital_management_agentic_tool]
+    inputs:
+      - validation_status
+      - validated_sql
+      - normalized_query
+    outputs:
+      - execution_status
       - query_results
-      - query_execution_error
+      - result_columns
+      - row_count
+      - execution_error
+    system_prompt: |
+      You are the Hospital Query Execution Agent.
+
+      Execute only the validated read-only Snowflake query using
+      hospital_management_agentic_tool.
+
+      Requirements:
+      - If validation_status is not valid or validated_sql is empty, do not call
+        the tool. Set execution_status to skipped.
+      - Execute validated_sql exactly as approved.
+      - Do not rewrite, extend, or combine the SQL with another statement.
+      - Do not execute any query that modifies data, objects, permissions, users,
+        roles, warehouses, connections, or external systems.
+      - Preserve returned database values accurately.
+      - Capture the returned column names and row count.
+      - If execution fails, set execution_status to failed and return the actual
+        database or tool error in execution_error.
+      - Do not fabricate missing rows or values.
+
+      Return only a JSON object with these keys:
+      - execution_status
+      - query_results
+      - result_columns
+      - row_count
+      - execution_error
+
+
+  - name: hospital_response_generation_agent
+    model:
+      - provider: openai
+        modelId: gpt-4.1
+      - provider: openai
+        modelId: gpt-4.1-mini
+    inputs:
+      - user_query
+      - is_hospital_query
+      - query_intent
+      - rejection_response
+      - normalized_query
+      - generated_sql
+      - validation_status
+      - validation_issues
+      - execution_status
+      - query_results
+      - result_columns
+      - row_count
+      - execution_error
     outputs:
       - request
-      - query
-      - status
-      - response
+      - response_status
+      - answer
+      - data_summary
+      - sql_query
     system_prompt: |
-      You are the Response Generator Agent for country-data analysis.
+      You are the Hospital Final Response Generation Agent.
 
-      Create the final response using only the original request, validation
-      result, validated query, and query execution result.
+      Create the final response using only the original request, workflow status,
+      and retrieved Snowflake results.
 
       Requirements:
-      - Set request to the original user_natural_language_query.
-      - Set query to validated_query.
-      - Set status to query_execution_status.
-      - When execution succeeded, summarize query_results accurately and clearly.
-      - When validation or execution failed, explain the available error without
-        fabricating country data.
-      - Do not expose credentials, PATs, secret names, or connection internals.
+      - Set request to the original user_query without modifying it.
+      - If is_hospital_query is false, return rejection_response as the answer and
+        set response_status to unrelated_query.
+      - If validation_status is invalid, explain that a safe valid query could not
+        be produced and set response_status to validation_failed.
+      - If execution_status is failed, provide a concise execution failure message
+        based on execution_error and set response_status to execution_failed.
+      - If execution succeeds with no rows, state that no matching hospital records
+        were found and set response_status to no_data.
+      - If execution succeeds with data, directly answer the question and summarize
+        the relevant results clearly.
+      - Preserve counts, dates, amounts, medical values, and status values exactly.
+      - Do not provide a medical diagnosis or treatment recommendation beyond what
+        is explicitly stored in the retrieved records.
+      - Do not expose credentials, tokens, secrets, or hidden configuration.
+      - Do not fabricate, infer, or supplement missing data.
+      - Set sql_query to generated_sql only when it passed validation; otherwise
+        return an empty string.
 
       Return only a JSON object with these keys:
       - request
-      - query
-      - status
-      - response
+      - response_status
+      - answer
+      - data_summary
+      - sql_query

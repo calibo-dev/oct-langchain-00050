@@ -26,6 +26,7 @@ dependencies = [
   "langchain-anthropic>=1.4.8",
   "langchain-google-genai>=4.2.6",
   "snowflake-connector-python>=3.12,<4",
+  "opentelemetry-api>=1.44.0",
 ]
 
 [project.optional-dependencies]
