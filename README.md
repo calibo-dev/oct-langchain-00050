@@ -27,10 +27,12 @@ src/latest_ai_development/
 ├── agents/                 # Configuration, factories and fallback runtime
 ├── models/                 # Provider model builders and registry
 ├── stages/                 # Workflow schemas and dependency validation
-├── connections/            # Connection managers and registry
-│   └── snowflake/          # Named connections and PAT resolution
-├── tools/                  # Shared tool configuration and factories
-│   └── snowflake/          # Metadata discovery and SQL execution
+├── connections/            # Connector-neutral loading, lifecycle and registry
+├── tools/                  # Discovery, shared contracts and tool factories
+│   └── snowflake/
+│       ├── plugin.py       # Connector validation and construction entry point
+│       ├── connections/    # Schemas, PAT resolution and cached connections
+│       └── tools/          # Schemas, metadata discovery and SQL execution
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
     ├── agents.yaml
@@ -44,6 +46,26 @@ src/latest_ai_development/
 `config.py` loads YAML; `schema.py` defines its shape; `validator.py` checks
 contracts; `factory.py` creates runtime objects; `registry.py` stores them for
 lookup. Connector-specific implementations stay inside connector folders.
+
+## Adding a connector
+
+Add `tools/<connector>/plugin.py` exporting `plugin`, an instance of
+`ConnectorPlugin` from `tools/base.py`. Its name must match the folder. It supplies
+four functions: `validate_connections`, `validate_tool`, `build_manager`, and
+`build_tool`. Keep all connector-specific schemas, validators and runtime code
+under that folder, following Snowflake's layout.
+
+Place configuration in the existing `config/tools/` directory, using filenames
+`<connector>_connections.yaml` and `<connector>_tools.yaml`. Shared loaders derive
+these paths by convention. No central connector mapping or schema union needs
+editing. Tool names remain globally unique, and agents select them in `agents.yaml`.
+Add vendor dependencies separately when required.
+
+Discovery imports immediate installed connector folders once per process. YAML
+cannot supply arbitrary import paths. Restart after adding a connector. Every
+discovered connector needs its tools YAML (use `tools: []` if unused); connection
+configuration is loaded only for active tools during application startup. A
+missing or invalid plugin/configuration produces a startup error.
 
 ## Configuration
 

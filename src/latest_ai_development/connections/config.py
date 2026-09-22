@@ -11,11 +11,9 @@ from latest_ai_development.connections.validator import (
     validate_connections_configuration,
 )
 from latest_ai_development.core.settings import CONFIG_DIR, load_yaml_file
+from latest_ai_development.tools.discovery import discover_connectors, get_connector
 
 TOOLS_CONFIG_DIR = CONFIG_DIR / "tools"
-CONNECTION_CONFIG_FILES = {
-    "snowflake": TOOLS_CONFIG_DIR / "snowflake_connections.yaml",
-}
 
 
 def load_connections_configuration(
@@ -23,7 +21,7 @@ def load_connections_configuration(
 ) -> ConnectionConfigurations:
     """Load connection definitions required by the active tools."""
     connectors = (
-        tuple(CONNECTION_CONFIG_FILES)
+        tuple(discover_connectors())
         if required_names_by_connector is None
         else tuple(required_names_by_connector)
     )
@@ -50,13 +48,8 @@ def load_connections_configuration(
 
 def _get_connection_config_path(connector: str) -> Path:
     """Return the configured YAML path for one connector."""
-    try:
-        return CONNECTION_CONFIG_FILES[connector]
-    except KeyError as exc:
-        supported = sorted(CONNECTION_CONFIG_FILES)
-        raise ValueError(
-            f"Unsupported connection connector '{connector}'. Supported connectors: {supported}"
-        ) from exc
+    get_connector(connector)
+    return TOOLS_CONFIG_DIR / f"{connector}_connections.yaml"
 
 
 def _select_required_connections(
@@ -99,4 +92,4 @@ def _select_required_connections(
     }
 
 
-__all__ = ["CONNECTION_CONFIG_FILES", "load_connections_configuration"]
+__all__ = ["load_connections_configuration"]

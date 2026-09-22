@@ -6,13 +6,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from latest_ai_development.core.settings import CONFIG_DIR, load_yaml_file
+from latest_ai_development.tools.discovery import discover_connectors
 from latest_ai_development.tools.schema import ToolsConfiguration
 from latest_ai_development.tools.validator import validate_tools_configuration
 
 TOOLS_CONFIG_DIR = CONFIG_DIR / "tools"
-TOOL_CONFIG_FILES = {
-    "snowflake": TOOLS_CONFIG_DIR / "snowflake_tools.yaml",
-}
 
 
 def load_tools_configuration(
@@ -20,12 +18,24 @@ def load_tools_configuration(
 ) -> ToolsConfiguration:
     """Load all connector tools or only tools used by active agents."""
     raw_tools: list[Any] = []
+    seen_names: set[str] = set()
 
-    for config_path in TOOL_CONFIG_FILES.values():
+    for connector in discover_connectors():
+        config_path = TOOLS_CONFIG_DIR / f"{connector}_tools.yaml"
         raw_configuration = load_yaml_file(config_path)
         configured_tools = raw_configuration.get("tools")
         if not isinstance(configured_tools, list):
             raise ValueError(f"{config_path.name} must contain a 'tools' list")
+        for tool in configured_tools:
+            if not isinstance(tool, Mapping) or tool.get("connector") != connector:
+                raise ValueError(
+                    f"Every tool in {config_path.name} must use connector '{connector}'"
+                )
+            name = tool.get("name")
+            if isinstance(name, str):
+                if name in seen_names:
+                    raise ValueError(f"Duplicate tool name '{name}' across tool configuration")
+                seen_names.add(name)
         raw_tools.extend(configured_tools)
 
     raw_configuration = {"tools": raw_tools}

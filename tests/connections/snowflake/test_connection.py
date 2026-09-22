@@ -2,11 +2,11 @@ from typing import Any
 
 import pytest
 
-import latest_ai_development.connections.snowflake.connection as connection_module
-from latest_ai_development.connections.snowflake.connection import (
+import latest_ai_development.tools.snowflake.connections.connection as connection_module
+from latest_ai_development.tools.snowflake.connections.connection import (
     SnowflakeConnectionManager,
 )
-from latest_ai_development.connections.snowflake.schema import (
+from latest_ai_development.tools.snowflake.connections.schema import (
     SnowflakeConnectionDefinition,
 )
 

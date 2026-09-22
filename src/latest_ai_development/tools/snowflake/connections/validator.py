@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from latest_ai_development.connections.snowflake.schema import (
+from latest_ai_development.tools.snowflake.connections.schema import (
     SnowflakeConnectionsConfiguration,
 )
 

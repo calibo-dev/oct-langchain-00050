@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from latest_ai_development.tools.snowflake.schema import SnowflakeToolDefinition
+from latest_ai_development.tools.snowflake.tools.schema import SnowflakeToolDefinition
 
 
 def validate_snowflake_tool_definition(

@@ -1,12 +1,6 @@
-"""Connector-neutral connection configuration types."""
+"""Connector-neutral configuration types; concrete schemas belong to plugins."""
 
-from __future__ import annotations
+from pydantic import BaseModel
 
-from latest_ai_development.connections.snowflake.schema import (
-    SnowflakeConnectionsConfiguration,
-)
-
-type ConnectionConfiguration = SnowflakeConnectionsConfiguration
+type ConnectionConfiguration = BaseModel
 type ConnectionConfigurations = dict[str, ConnectionConfiguration]
-
-__all__ = ["ConnectionConfiguration", "ConnectionConfigurations"]

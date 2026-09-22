@@ -2,22 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import ValidationError
 
+from latest_ai_development.tools.discovery import discover_connectors
 from latest_ai_development.tools.schema import BaseToolDefinition, ToolsConfiguration
-from latest_ai_development.tools.snowflake.validator import (
-    validate_snowflake_tool_definition,
-)
-
-ToolDefinitionValidator = Callable[[Mapping[str, Any]], BaseToolDefinition]
-
-# Adding another connector requires its own schema/validator and one entry here.
-TOOL_DEFINITION_VALIDATORS: dict[str, ToolDefinitionValidator] = {
-    "snowflake": validate_snowflake_tool_definition,
-}
 
 
 def validate_tools_configuration(
@@ -30,6 +21,7 @@ def validate_tools_configuration(
 
     definitions: list[BaseToolDefinition] = []
     errors: list[str] = []
+    plugins = discover_connectors()
 
     for index, raw_tool in enumerate(raw_tools):
         if not isinstance(raw_tool, Mapping):
@@ -41,9 +33,9 @@ def validate_tools_configuration(
             errors.append(f"tools[{index}] must declare a connector")
             continue
 
-        validator = TOOL_DEFINITION_VALIDATORS.get(connector)
-        if validator is None:
-            supported = sorted(TOOL_DEFINITION_VALIDATORS)
+        plugin = plugins.get(connector)
+        if plugin is None:
+            supported = sorted(plugins)
             errors.append(
                 f"tools[{index}] uses unsupported connector '{connector}'; "
                 f"supported connectors: {supported}"
@@ -51,8 +43,8 @@ def validate_tools_configuration(
             continue
 
         try:
-            definitions.append(validator(raw_tool))
-        except ValidationError as exc:
+            definitions.append(plugin.validate_tool(raw_tool))
+        except ValueError as exc:
             errors.append(f"tools[{index}] is invalid for connector '{connector}': {exc}")
 
     if errors:
@@ -64,4 +56,4 @@ def validate_tools_configuration(
         raise ValueError(f"Invalid tool configuration:\n{exc}") from exc
 
 
-__all__ = ["TOOL_DEFINITION_VALIDATORS", "validate_tools_configuration"]
+__all__ = ["validate_tools_configuration"]

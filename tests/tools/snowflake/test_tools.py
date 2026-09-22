@@ -1,7 +1,7 @@
 import json
 
-from latest_ai_development.tools.snowflake.schema import SnowflakeToolDefinition
-from latest_ai_development.tools.snowflake.tools import (
+from latest_ai_development.tools.snowflake.tools.schema import SnowflakeToolDefinition
+from latest_ai_development.tools.snowflake.tools.tools import (
     _add_row_limit,
     _build_metadata_query,
     create_snowflake_tool,

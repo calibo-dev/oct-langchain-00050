@@ -16,10 +16,10 @@ from typing import Any
 
 import snowflake.connector
 
-from latest_ai_development.connections.snowflake.schema import (
+from latest_ai_development.core.secrets_manager import SecretsManager
+from latest_ai_development.tools.snowflake.connections.schema import (
     SnowflakeConnectionDefinition,
 )
-from latest_ai_development.core.secrets_manager import SecretsManager
 
 logger = logging.getLogger(__name__)
 

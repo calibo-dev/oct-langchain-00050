@@ -10,10 +10,10 @@ from typing import Any, Literal
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from latest_ai_development.connections.snowflake.connection import (
+from latest_ai_development.tools.snowflake.connections.connection import (
     SnowflakeConnectionManager,
 )
-from latest_ai_development.tools.snowflake.schema import SnowflakeToolDefinition
+from latest_ai_development.tools.snowflake.tools.schema import SnowflakeToolDefinition
 
 logger = logging.getLogger(__name__)
 
