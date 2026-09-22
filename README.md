@@ -178,9 +178,8 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check src tests
 ```
 
-Tests use fake services and disable remote tracing. They cover API validation,
-startup contracts, fallback execution, tool-call evidence, PAT sources,
-connection reuse, metadata queries, output parsing and shutdown cleanup.
+The test suite contains one placeholder test that prints `success`. It verifies
+test-runner execution only. Use `pytest -q -s` to display the message.
 
 This replaces the research/reporting classes, chain builders and separate
 `workflow.yaml`. It returns JSON and does not automatically persist `report.md`.
