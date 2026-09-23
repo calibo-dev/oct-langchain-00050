@@ -59,17 +59,16 @@ class SnowflakeConnectionDefinition(BaseModel):
     account: str = Field(min_length=1)
     host: str | None = None
     warehouse: str = Field(min_length=1)
-    database: str = Field(min_length=1)
-    schema_name: str = Field(alias="schema", min_length=1)
+    database: str | None = None
+    schema_name: str | None = Field(default=None, alias="schema")
     user: str = Field(min_length=1)
-    role: str | None = None
     authentication: SnowflakeAuthentication
     connection_options: SnowflakeConnectionOptions = Field(
         default_factory=SnowflakeConnectionOptions,
         alias="connectionOptions",
     )
 
-    @field_validator("host", "role", mode="before")
+    @field_validator("host", "database", "schema_name", mode="before")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         """Treat blank optional connection values as missing."""

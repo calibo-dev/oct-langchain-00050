@@ -1,13 +1,15 @@
 providers:
   OpenAI:
     models:
-      gpt-4.1:
-        parameters:
-          temperature: 0.3
-          maxOutputTokens: 10000
-          responseFormat: json_object
-      gpt-4.1-mini:
-        parameters:
-          temperature: 0.3
-          maxOutputTokens: 10000
-          responseFormat: json_object
+      primary:
+        gpt-4.1:
+          parameters:
+            temperature: 0.3
+            maxOutputTokens: 10000
+            responseFormat: json_object
+      fallback:
+        gpt-4.1-mini:
+          parameters:
+            temperature: 0.3
+            maxOutputTokens: 10000
+            responseFormat: json_object

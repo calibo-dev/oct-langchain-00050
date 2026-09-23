@@ -79,18 +79,18 @@ class SnowflakeConnectionManager:
         parameters: dict[str, Any] = {
             "account": definition.account,
             "warehouse": definition.warehouse,
-            "database": definition.database,
-            "schema": definition.schema_name,
             "user": definition.user,
             "authenticator": "programmatic_access_token",
             "token": pat_token,
             **definition.connection_options.as_connector_parameters(),
         }
 
+        if definition.database:
+            parameters["database"] = definition.database
+        if definition.schema_name:
+            parameters["schema"] = definition.schema_name
         if definition.host:
             parameters["host"] = definition.host
-        if definition.role:
-            parameters["role"] = definition.role
         return parameters
 
 

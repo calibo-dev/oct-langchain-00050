@@ -6,7 +6,6 @@ connections:
     database: HOSPITAL_MANAGEMENT_DB
     schema: HOSPITAL_MANAGEMENT_SCHEMA
     user: HOSPITAL_MANAGEMENT_USER
-    role: HOSPITAL_MANAGEMENT_ROLE
 
     # These are environment-variable names, not actual PAT values.
     # Populate exactly one option at runtime.
