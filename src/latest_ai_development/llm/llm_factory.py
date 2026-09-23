@@ -11,7 +11,7 @@ from latest_ai_development.config.settings import get_settings, normalize_provid
 
 load_dotenv()
 
-SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "Ollama")
+SUPPORTED_PROVIDERS = ("OpenAI", "AnthropicAI", "GeminiAI", "BedrockAI", "MicrosoftFoundryAI", "Ollama")
 
 
 def resolve_api_key(
@@ -119,7 +119,7 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
 
     if provider == "bedrockai":
 
-        api_key = resolve_api_key(getattr(settings, "bedrockai_api_key_secret", ""))
+        api_key = resolve_api_key(getattr(settings, "bedrock_ai_api_key_secret", ""))
 
         region_name = os.getenv("AWS_REGION_NAME", "").strip()
 
@@ -147,6 +147,54 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
             region_name=region_name,
         )
 
+    if provider == "microsoftfoundryai":
+
+        endpoint = getattr(settings, "microsoft_foundry_ai_endpoint", "")
+        api_key = resolve_api_key(
+            getattr(settings, "microsoft_foundry_ai_api_key_secret", "")
+        )
+        if not endpoint:
+            raise ValueError(
+                "Microsoft Foundry AI endpoint not found. Set MICROSOFT_FOUNDRY_AI_ENDPOINT."
+            )
+
+        if not api_key:
+            raise ValueError(
+                "Microsoft Foundry AI API key not found. Set MICROSOFT_FOUNDRY_AI_API_KEY_SECRET."
+            )
+
+        route, base_url = _microsoft_foundry_ai_route(endpoint)
+
+        if route == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except ImportError as exc:
+                raise ImportError(
+                    "Microsoft Foundry AI anthropic models require the 'langchain-anthropic' "
+                    "package. Run `uv sync` to install template dependencies."
+                ) from exc
+
+            return ChatAnthropic(
+                **_anthropic_kwargs(model_name, generation_defaults),
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+        try:
+            from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
+        except ImportError as exc:
+            raise ImportError(
+                "Microsoft Foundry AI OpenAI-compatible models require the "
+                "'langchain-azure-ai' package. Run `uv sync` to install "
+                "template dependencies."
+            ) from exc
+
+        return AzureAIOpenAIApiChatModel(
+            **_openai_kwargs(model_name, generation_defaults),
+            credential=api_key,
+            endpoint=base_url,
+        )
+
     if provider == "ollama":
 
         return ChatOllama(
@@ -158,6 +206,16 @@ def get_llm(model_config: dict[str, Any], section: str = "primary"):
         f"Unsupported provider '{raw_provider}'. Expected one of: {', '.join(SUPPORTED_PROVIDERS)}"
     )
 
+
+def _microsoft_foundry_ai_route(endpoint: str) -> tuple[str, str]:
+    endpoint_lower = endpoint.lower()
+    if endpoint_lower.endswith("/anthropic"):
+        return "anthropic", endpoint
+    if endpoint_lower.endswith("/openai"):
+        return "openai", f"{endpoint}/v1/"
+    raise ValueError(
+        "MICROSOFT_FOUNDRY_AI_ENDPOINT must end with /anthropic or /openai."
+    )
 
 def get_llm_candidates(model_config: dict[str, Any]) -> list[Any]:
     """Return primary plus optional fallback LLMs for a stage."""
