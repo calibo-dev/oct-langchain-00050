@@ -32,27 +32,7 @@ def model_exists(
 ) -> bool:
     """Return whether a provider and model exist in the loaded configuration."""
     provider = _find_provider(configuration, provider_name)
-    return provider is not None and model_name in provider.models.all_models()
-
-
-def model_is_primary(
-    configuration: ModelsConfiguration,
-    provider_name: str,
-    model_name: str,
-) -> bool:
-    """Return whether a model is the provider's configured primary."""
-    provider = _find_provider(configuration, provider_name)
-    return provider is not None and model_name in provider.models.primary
-
-
-def model_is_fallback(
-    configuration: ModelsConfiguration,
-    provider_name: str,
-    model_name: str,
-) -> bool:
-    """Return whether a model is one of the provider's fallbacks."""
-    provider = _find_provider(configuration, provider_name)
-    return provider is not None and model_name in provider.models.fallback
+    return provider is not None and model_name in provider.models
 
 
 def get_model_parameters(
@@ -65,7 +45,7 @@ def get_model_parameters(
     if provider is None:
         raise ValueError(f"Provider '{provider_name}' is not configured in models.yaml")
 
-    model = provider.models.all_models().get(model_name)
+    model = provider.models.get(model_name)
     if model is None:
         raise ValueError(
             f"Model '{model_name}' is not configured for provider '{provider_name}' in models.yaml"
@@ -114,25 +94,7 @@ def _select_required_models(
             errors.append(f"provider '{configured_provider_name}' must contain a 'models' mapping")
             continue
 
-        raw_primary_models = raw_models.get("primary")
-        raw_fallback_models = raw_models.get("fallback", {})
-        if not isinstance(raw_primary_models, dict):
-            errors.append(
-                f"provider '{configured_provider_name}' must contain a "
-                "'models.primary' mapping"
-            )
-            continue
-        if not isinstance(raw_fallback_models, dict):
-            errors.append(
-                f"provider '{configured_provider_name}' must contain a "
-                "'models.fallback' mapping"
-            )
-            continue
-
-        model_role = "primary" if model.model_id in raw_primary_models else "fallback"
-        raw_model = raw_primary_models.get(model.model_id)
-        if raw_model is None:
-            raw_model = raw_fallback_models.get(model.model_id)
+        raw_model = raw_models.get(model.model_id)
         if raw_model is None:
             errors.append(
                 f"model '{model.model_id}' is not configured for provider "
@@ -143,9 +105,9 @@ def _select_required_models(
         provider_name = str(configured_provider_name)
         selected_provider = selected_providers.setdefault(
             provider_name,
-            {"models": {"primary": {}, "fallback": {}}},
+            {"models": {}},
         )
-        selected_provider["models"][model_role][model.model_id] = raw_model
+        selected_provider["models"][model.model_id] = raw_model
 
     if errors:
         raise ValueError("Invalid models.yaml configuration:\n- " + "\n- ".join(errors))
@@ -157,6 +119,4 @@ __all__ = [
     "get_model_parameters",
     "load_models_configuration",
     "model_exists",
-    "model_is_fallback",
-    "model_is_primary",
 ]

@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 from latest_ai_development.agents.schema import AgentDefinition
-from latest_ai_development.models.config import (
-    model_exists,
-    model_is_fallback,
-    model_is_primary,
-)
+from latest_ai_development.models.config import model_exists
 from latest_ai_development.models.schema import ModelsConfiguration
 from latest_ai_development.tools.config import tool_exists
 from latest_ai_development.tools.schema import ToolsConfiguration
@@ -37,22 +33,16 @@ def _validate_agent_models(
 ) -> None:
     """Check that every configured model exists in models.yaml."""
     for model_index, model in enumerate(definition.model):
-        model_is_configured = model_exists(
+        if model_exists(
             models_configuration,
             model.provider,
             model.model_id,
-        )
-        model_has_expected_role = (
-            model_is_primary(models_configuration, model.provider, model.model_id)
-            if model_index == 0
-            else model_is_fallback(models_configuration, model.provider, model.model_id)
-        )
-        if model_is_configured and model_has_expected_role:
+        ):
             continue
 
         model_role = "primary" if model_index == 0 else f"fallback #{model_index}"
         errors.append(
-            f"agent '{definition.name}' references an unknown or incorrectly assigned "
+            f"agent '{definition.name}' references an unknown "
             f"{model_role} model "
             f"'{model.provider}/{model.model_id}'"
         )

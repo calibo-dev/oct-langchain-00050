@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelParameters(BaseModel):
@@ -54,56 +54,22 @@ class ModelDefinition(BaseModel):
     parameters: ModelParameters = Field(default_factory=ModelParameters)
 
 
-class ProviderModels(BaseModel):
-    """One primary model and zero or more ordered fallback models."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    primary: dict[str, ModelDefinition]
-    fallback: dict[str, ModelDefinition] = Field(default_factory=dict)
-
-    @field_validator("primary")
-    @classmethod
-    def validate_primary(
-        cls,
-        models: dict[str, ModelDefinition],
-    ) -> dict[str, ModelDefinition]:
-        """Require exactly one primary model for the provider."""
-        if len(models) != 1:
-            raise ValueError("primary must contain exactly one model")
-
-        _validate_model_names(models)
-        return models
-
-    @field_validator("fallback")
-    @classmethod
-    def validate_fallbacks(
-        cls,
-        models: dict[str, ModelDefinition],
-    ) -> dict[str, ModelDefinition]:
-        """Validate fallback names while keeping their YAML order."""
-        _validate_model_names(models)
-        return models
-
-    @model_validator(mode="after")
-    def validate_unique_models(self) -> ProviderModels:
-        """Prevent the primary model from also being a fallback."""
-        primary_model_name = next(iter(self.primary))
-        if primary_model_name in self.fallback:
-            raise ValueError("the primary model cannot also be a fallback model")
-        return self
-
-    def all_models(self) -> dict[str, ModelDefinition]:
-        """Return primary first, followed by fallbacks in configured order."""
-        return {**self.primary, **self.fallback}
-
-
 class ProviderDefinition(BaseModel):
-    """All models configured for one provider, such as OpenAI."""
+    """Shared model definitions for one provider, independent of agent order."""
 
     model_config = ConfigDict(extra="forbid")
 
-    models: ProviderModels
+    models: dict[str, ModelDefinition] = Field(min_length=1)
+
+    @field_validator("models")
+    @classmethod
+    def validate_models(
+        cls,
+        models: dict[str, ModelDefinition],
+    ) -> dict[str, ModelDefinition]:
+        """Reject blank model names in the provider catalog."""
+        _validate_model_names(models)
+        return models
 
 
 def _validate_model_names(models: dict[str, ModelDefinition]) -> None:
