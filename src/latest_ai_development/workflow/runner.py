@@ -17,10 +17,7 @@ from latest_ai_development.agents.schema import AgentDefinition
 from latest_ai_development.stages.schema import StageDefinition, WorkflowDefinition
 from latest_ai_development.workflow.errors import WorkflowExecutionError
 from latest_ai_development.workflow.prompt_builder import build_user_prompt
-from latest_ai_development.workflow.response_parser import (
-    extract_agent_outputs,
-    extract_response_text,
-)
+from latest_ai_development.workflow.response_parser import validate_agent_result
 from latest_ai_development.workflow.trace_context import (
     build_agent_invoke_config,
     build_agent_trace_extra,
@@ -229,37 +226,16 @@ class LatestAiDevelopmentWorkflow:
         )
 
         try:
-            result = agent.invoke(
+            return agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]},
                 config=agent_config,
+                validate_result=lambda result: validate_agent_result(definition, result, values),
             )
-            # A model's final prose is not proof that an external operation ran.
-            # Require an actual tool response before accepting configured outputs.
-            condition = definition.required_tool_when
-            if condition is not None and all(
-                values.get(name) == expected for name, expected in condition.items()
-            ):
-                messages = result.get("messages", []) if isinstance(result, Mapping) else []
-                tool_executed = False
-                for message in messages:
-                    if isinstance(message, Mapping):
-                        message_type = message.get("type") or message.get("role")
-                        tool_name = message.get("name")
-                    else:
-                        message_type = getattr(message, "type", None)
-                        tool_name = getattr(message, "name", None)
-                    if message_type == "tool" and tool_name in definition.tools:
-                        tool_executed = True
-                        break
-                if not tool_executed:
-                    raise ValueError(
-                        "required tool execution is missing; refusing unverified output"
-                    )
-            response_text = extract_response_text(result)
-            return extract_agent_outputs(definition, response_text)
         except Exception as exc:
             reason = str(exc).strip() or type(exc).__name__
-            raise WorkflowExecutionError(f"Agent '{agent_name}' failed: {reason}") from exc
+            raise WorkflowExecutionError(
+                f"Stage '{stage_name}', agent '{agent_name}' failed: {reason}"
+            ) from exc
 
     def _validate_request_inputs(self, values: Mapping[str, Any]) -> None:
         """Check that the request contains inputs required by starting stages."""

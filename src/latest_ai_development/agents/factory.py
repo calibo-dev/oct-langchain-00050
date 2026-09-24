@@ -6,11 +6,13 @@ import logging
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 
 from latest_ai_development.agents.registry import AgentRegistry
 from latest_ai_development.agents.runtime import (
     AgentRuntime,
     StrictToolCallingMiddleware,
+    ToolFailureMiddleware,
 )
 from latest_ai_development.agents.schema import AgentDefinition
 from latest_ai_development.models.registry import ModelRegistry
@@ -64,11 +66,9 @@ def _create_agent_runtime(
         llm = model_registry.get(model.provider, model.model_id)
         # Strict tool conversion is OpenAI-specific; other providers receive
         # their native schemas without an unsupported model parameter.
-        middleware = (
-            [StrictToolCallingMiddleware()]
-            if tools and model.provider.strip().lower() == "openai"
-            else []
-        )
+        middleware: list[AgentMiddleware] = [ToolFailureMiddleware()] if tools else []
+        if tools and model.provider.strip().lower() == "openai":
+            middleware.append(StrictToolCallingMiddleware())
         runtime_agents.append(
             create_agent(
                 model=llm,

@@ -7,16 +7,46 @@ from collections.abc import Mapping
 from typing import Any
 
 from latest_ai_development.agents.schema import AgentDefinition
+from latest_ai_development.core.errors import InvalidAgentOutputError
+
+
+def validate_agent_result(
+    definition: AgentDefinition,
+    result: Any,
+    values: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate required tool use and declared outputs for one model attempt."""
+    response_text = extract_response_text(result)
+    condition = definition.required_tool_when
+    if condition is not None and all(
+        values.get(name) == expected for name, expected in condition.items()
+    ):
+        tool_executed = False
+        for message in result["messages"]:
+            if isinstance(message, Mapping):
+                message_type = message.get("type") or message.get("role")
+                tool_name = message.get("name")
+            else:
+                message_type = getattr(message, "type", None)
+                tool_name = getattr(message, "name", None)
+            if message_type == "tool" and tool_name in definition.tools:
+                tool_executed = True
+                break
+        if not tool_executed:
+            raise InvalidAgentOutputError(
+                "required tool execution is missing; refusing unverified output"
+            )
+    return extract_agent_outputs(definition, response_text)
 
 
 def extract_response_text(result: Any) -> str:
     """Read the final text content from a LangChain agent result."""
     if not isinstance(result, Mapping):
-        raise ValueError("agent returned an invalid result")
+        raise InvalidAgentOutputError("agent returned an invalid result")
 
     messages = result.get("messages")
     if not isinstance(messages, list) or not messages:
-        raise ValueError("agent returned no messages")
+        raise InvalidAgentOutputError("agent returned no messages")
 
     last_message = messages[-1]
     content = (
@@ -33,7 +63,7 @@ def extract_response_text(result: Any) -> str:
         if response_text:
             return response_text
 
-    raise ValueError("agent returned an empty text response")
+    raise InvalidAgentOutputError("agent returned an empty text response")
 
 
 def extract_agent_outputs(
@@ -48,7 +78,9 @@ def extract_agent_outputs(
             missing_outputs.append(name)
 
     if missing_outputs:
-        raise ValueError(f"agent '{definition.name}' omitted configured outputs: {missing_outputs}")
+        raise InvalidAgentOutputError(
+            f"agent '{definition.name}' omitted configured outputs: {missing_outputs}"
+        )
 
     outputs: dict[str, Any] = {}
     for name in definition.outputs:
@@ -77,12 +109,14 @@ def _load_json_object(
     try:
         payload = json.loads(_strip_json_code_fence(response_text))
     except json.JSONDecodeError as exc:
-        raise ValueError(
+        raise InvalidAgentOutputError(
             f"agent '{definition.name}' must return a JSON object for outputs {definition.outputs}"
         ) from exc
 
     if not isinstance(payload, Mapping):
-        raise ValueError(f"agent '{definition.name}' returned a non-object JSON value")
+        raise InvalidAgentOutputError(
+            f"agent '{definition.name}' returned a non-object JSON value"
+        )
 
     return payload
 

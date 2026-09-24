@@ -11,6 +11,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from latest_ai_development.connections.base import DatabaseConnectionManager, MetadataScope
+from latest_ai_development.core.errors import ToolExecutionError
 from latest_ai_development.tools.schema import BaseToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ def create_database_tool(
                 definition.name,
                 definition.connector,
             )
-            return _error_result(operation, exc)
+            raise ToolExecutionError(definition.name, operation) from exc
 
         return json.dumps(result, default=str)
 
@@ -148,17 +149,6 @@ def _build_tool_description(
         lines.extend(["", "Do not use this tool for:"])
         lines.extend(f"- {guideline}" for guideline in definition.non_usage_guidelines)
     return "\n".join(lines)
-
-
-def _error_result(error: str, exception: Exception) -> str:
-    """Return connector errors using the same JSON transport as successful data."""
-    return json.dumps(
-        {
-            "status": "error",
-            "error": error,
-            "message": f"{type(exception).__name__}: {exception}",
-        }
-    )
 
 
 __all__ = [
