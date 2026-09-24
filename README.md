@@ -28,11 +28,10 @@ src/latest_ai_development/
 ├── models/                 # Provider model builders and registry
 ├── stages/                 # Workflow schemas and dependency validation
 ├── connections/            # Connector-neutral loading, lifecycle and registry
-├── tools/                  # Discovery, shared contracts and tool factories
-│   └── snowflake/
-│       ├── plugin.py       # Connector validation and construction entry point
-│       ├── connections.py  # Schemas, PAT resolution and cached connections
-│       └── tools.py        # Schemas, metadata discovery and SQL execution
+├── tools/                  # Dynamic database tools and connector discovery
+│   ├── database_tools.py   # Connector-neutral query and metadata tool
+│   └── connectors/
+│       └── snowflake_connector.py  # Snowflake connection and SQL dialect
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
     ├── agents.yaml
@@ -44,15 +43,16 @@ src/latest_ai_development/
 
 `config.py` loads YAML; `schema.py` defines its shape; `validator.py` checks
 contracts; `factory.py` creates runtime objects; `registry.py` stores them for
-lookup. Connector-specific implementations stay inside connector folders.
+lookup. Connector-specific implementations stay inside the `tools/connectors/`
+package.
 
 ## Adding a connector
 
-Add `tools/<connector>/plugin.py` exporting `plugin`, an instance of
-`ConnectorPlugin` from `tools/base.py`. Its name must match the folder. It supplies
+Add `tools/connectors/<name>_connector.py` exporting `plugin`, an instance of
+`ConnectorPlugin` from `tools/base.py`. Its name must match `<name>`. It supplies
 four functions: `validate_connections`, `validate_tool`, `build_manager`, and
-`build_tool`. Keep connector-specific connection code in `connections.py` and
-tool code in `tools.py`, following Snowflake's layout.
+`build_tool`. Keep authentication, connection creation, SQL dialect, and metadata
+discovery in the connector. Reuse the generic behavior in `database_tools.py`.
 
 Add connection records to `config/tools_connections.yaml` and set their
 `connector` value to the plugin name. Add tool descriptions to
@@ -61,8 +61,8 @@ globally unique `connectionName`. Tool names also remain globally unique, and
 agents select them in `agents.yaml`. Add vendor dependencies separately when
 required.
 
-Discovery imports immediate installed connector folders once per process. YAML
-cannot supply arbitrary import paths. Restart after adding a connector. Connection
+Discovery imports installed `*_connector.py` modules once per process. YAML cannot
+supply arbitrary import paths. Restart after adding a connector. Connection
 configuration is loaded only for active tools during application startup. A
 missing or invalid plugin/configuration produces a startup error.
 
@@ -129,9 +129,9 @@ Populate exactly one environment variable referenced by `authentication`:
 - `secret`: its environment variable contains a secret-manager name whose value
   is the PAT, resolved through AWS Secrets Manager or Azure Key Vault.
 
-The tool discovers databases, schemas, tables or columns, or executes supplied
-SQL with bounded result sizes. Use a Snowflake user with read-only permissions:
-prompt instructions and row limits are not authorization controls. Model and tool
+The generic database tool delegates query execution and metadata discovery to the
+Snowflake connector. Use a Snowflake user with read-only permissions: prompt
+instructions and row limits are not authorization controls. Model and tool
 configuration is retained from the existing country workflow.
 
 ## Environment and running

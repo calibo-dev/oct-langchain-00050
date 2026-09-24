@@ -1,4 +1,4 @@
-"""Contract exported as ``plugin`` by each connector's plugin.py module."""
+"""Contract exported as ``plugin`` by each dynamically discovered connector module."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
