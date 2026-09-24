@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -56,6 +56,7 @@ class SnowflakeConnectionDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    connector: Literal["snowflake"]
     account: str = Field(min_length=1)
     host: str | None = None
     warehouse: str = Field(min_length=1)
@@ -79,7 +80,7 @@ class SnowflakeConnectionDefinition(BaseModel):
 
 
 class SnowflakeConnectionsConfiguration(BaseModel):
-    """Top-level object in ``snowflake_connections.yaml``."""
+    """Snowflake records selected from ``tools_connections.yaml``."""
 
     model_config = ConfigDict(extra="forbid")
 

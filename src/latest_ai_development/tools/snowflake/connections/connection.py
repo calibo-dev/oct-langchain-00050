@@ -1,6 +1,6 @@
 """Create and reuse Snowflake connections declared in YAML.
 
-Non-secret connection values live in ``snowflake_connections.yaml``. Each
+Non-secret connection values live in ``tools_connections.yaml``. Each
 connection also declares two environment-variable names. One can contain a PAT
 directly; the other can contain the name of an AWS Secrets Manager or Azure Key
 Vault secret. Exactly one of those environment variables must be populated.

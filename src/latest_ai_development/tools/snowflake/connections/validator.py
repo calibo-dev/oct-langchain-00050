@@ -18,4 +18,4 @@ def validate_snowflake_connections_configuration(
     try:
         return SnowflakeConnectionsConfiguration.model_validate(raw_configuration)
     except ValidationError as exc:
-        raise ValueError(f"Invalid snowflake_connections.yaml configuration:\n{exc}") from exc
+        raise ValueError(f"Invalid tools_connections.yaml configuration:\n{exc}") from exc

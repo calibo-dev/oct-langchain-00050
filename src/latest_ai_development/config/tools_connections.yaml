@@ -1,5 +1,6 @@
 connections:
   - name: hospital_management_connection
+    connector: snowflake
     account: HJGNKCC-EA00444
     host: HJGNKCC-EA00444.snowflakecomputing.com
     warehouse: HOSPITAL_MANAGEMENT_WH

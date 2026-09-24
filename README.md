@@ -38,9 +38,8 @@ src/latest_ai_development/
     ├── agents.yaml
     ├── models.yaml
     ├── stages.yaml
-    └── tools/
-        ├── snowflake_connections.yaml
-        └── snowflake_tools.yaml
+    ├── tools_connections.yaml
+    └── tools_info.yaml
 ```
 
 `config.py` loads YAML; `schema.py` defines its shape; `validator.py` checks
@@ -55,24 +54,25 @@ four functions: `validate_connections`, `validate_tool`, `build_manager`, and
 `build_tool`. Keep all connector-specific schemas, validators and runtime code
 under that folder, following Snowflake's layout.
 
-Place configuration in the existing `config/tools/` directory, using filenames
-`<connector>_connections.yaml` and `<connector>_tools.yaml`. Shared loaders derive
-these paths by convention. No central connector mapping or schema union needs
-editing. Tool names remain globally unique, and agents select them in `agents.yaml`.
-Add vendor dependencies separately when required.
+Add connection records to `config/tools_connections.yaml` and set their
+`connector` value to the plugin name. Add tool descriptions to
+`config/tools_info.yaml`; each tool selects its connector indirectly through its
+globally unique `connectionName`. Tool names also remain globally unique, and
+agents select them in `agents.yaml`. Add vendor dependencies separately when
+required.
 
 Discovery imports immediate installed connector folders once per process. YAML
-cannot supply arbitrary import paths. Restart after adding a connector. Every
-discovered connector needs its tools YAML (use `tools: []` if unused); connection
+cannot supply arbitrary import paths. Restart after adding a connector. Connection
 configuration is loaded only for active tools during application startup. A
 missing or invalid plugin/configuration produces a startup error.
 
 ## Configuration
 
-`models.yaml` stores parameters by provider and model ID. Providers are OpenAI,
-AnthropicAI, GeminiAI, BedrockAI and Ollama. `agents.yaml` references models in
-primary-then-fallback order and declares prompts, tools, inputs and outputs.
-Fallbacks run after invocation exceptions, not output-parsing failures.
+`models.yaml` stores one primary model and ordered fallback models per provider.
+Providers are OpenAI, AnthropicAI, GeminiAI, BedrockAI and Ollama. `agents.yaml`
+references models in primary-then-fallback order and declares prompts, tools,
+inputs and outputs. Fallbacks run after invocation exceptions, not output-parsing
+failures.
 
 `stages.yaml` owns the workflow, endpoint name and initial input names:
 
@@ -120,7 +120,8 @@ validate call arguments; they do not guarantee execution.
 
 ## Snowflake
 
-Connection properties live in `snowflake_connections.yaml`. A tool's
+Connection properties and `connector: snowflake` live in
+`tools_connections.yaml`. Tool descriptions live in `tools_info.yaml`. A tool's
 `connectionName` selects a named connection; multiple tools can share it.
 Populate exactly one environment variable referenced by `authentication`:
 
@@ -129,9 +130,9 @@ Populate exactly one environment variable referenced by `authentication`:
   is the PAT, resolved through AWS Secrets Manager or Azure Key Vault.
 
 The tool discovers databases, schemas, tables or columns, or executes supplied
-SQL with bounded result sizes. Use a read-only Snowflake role: prompt instructions
-and row limits are not authorization controls. Model and tool configuration is
-retained from the existing country workflow.
+SQL with bounded result sizes. Use a Snowflake user with read-only permissions:
+prompt instructions and row limits are not authorization controls. Model and tool
+configuration is retained from the existing country workflow.
 
 ## Environment and running
 
