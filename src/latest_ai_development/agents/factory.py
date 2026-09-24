@@ -15,6 +15,8 @@ from latest_ai_development.agents.runtime import (
     ToolFailureMiddleware,
 )
 from latest_ai_development.agents.schema import AgentDefinition
+from latest_ai_development.context.middleware import ContextPromptMiddleware
+from latest_ai_development.context.runtime import CONTEXT_REFERENCE, ContextRuntime
 from latest_ai_development.models.registry import ModelRegistry
 from latest_ai_development.tools.registry import ToolRegistry
 
@@ -25,13 +27,16 @@ def build_agent_registry(
     definitions: tuple[AgentDefinition, ...],
     model_registry: ModelRegistry,
     tool_registry: ToolRegistry,
+    context_configuration: ContextRuntime | None = None,
 ) -> AgentRegistry:
     """Create every configured primary/fallback agent and return one registry."""
     agents: dict[str, AgentRuntime] = {}
 
     for definition in definitions:
         try:
-            runtime = _create_agent_runtime(model_registry, tool_registry, definition)
+            runtime = _create_agent_runtime(
+                model_registry, tool_registry, definition, context_configuration
+            )
         except Exception as exc:
             reason = str(exc).strip() or type(exc).__name__
             primary_model = definition.primary_model
@@ -57,16 +62,23 @@ def _create_agent_runtime(
     model_registry: ModelRegistry,
     tool_registry: ToolRegistry,
     definition: AgentDefinition,
+    context_configuration: ContextRuntime | None = None,
 ) -> AgentRuntime:
     """Create primary and fallback LangChain agent objects during startup."""
     runtime_agents: list[Any] = []
     model_names: list[str] = []
     tools = tool_registry.get(definition.tools)
+    context_options: dict[str, Any] = {}
+    if context_configuration is not None:
+        context_configuration.validate_prompt(definition.system_prompt)
+        context_options["context_schema"] = context_configuration.schema
     for model in definition.model:
         llm = model_registry.get(model.provider, model.model_id)
         # Strict tool conversion is OpenAI-specific; other providers receive
         # their native schemas without an unsupported model parameter.
         middleware: list[AgentMiddleware] = [ToolFailureMiddleware()] if tools else []
+        if context_configuration is not None and CONTEXT_REFERENCE.search(definition.system_prompt):
+            middleware.append(ContextPromptMiddleware(definition.system_prompt))
         if tools and model.provider.strip().lower() == "openai":
             middleware.append(StrictToolCallingMiddleware())
         runtime_agents.append(
@@ -76,6 +88,7 @@ def _create_agent_runtime(
                 middleware=middleware,
                 system_prompt=definition.system_prompt,
                 name=definition.name,
+                **context_options,
             )
         )
         model_names.append(f"{model.provider}/{model.model_id}")

@@ -14,6 +14,7 @@ from langsmith import traceable
 
 from latest_ai_development.agents.registry import AgentRegistry
 from latest_ai_development.agents.schema import AgentDefinition
+from latest_ai_development.context.runtime import ContextRuntime, ContextValidationError
 from latest_ai_development.stages.schema import StageDefinition, WorkflowDefinition
 from latest_ai_development.workflow.errors import WorkflowExecutionError
 from latest_ai_development.workflow.prompt_builder import build_user_prompt
@@ -36,23 +37,33 @@ class LatestAiDevelopmentWorkflow:
         definition: WorkflowDefinition,
         agent_definitions: tuple[AgentDefinition, ...],
         agent_registry: AgentRegistry,
+        context_configuration: ContextRuntime | None = None,
     ) -> None:
         """Store the workflow definition and already-created agent registry."""
         self.definition = definition
         self.agent_definitions = self._group_agent_definitions(agent_definitions)
         self.agent_registry = agent_registry
+        self.context_configuration = context_configuration
 
     def kickoff(
         self,
         inputs: Mapping[str, Any],
         flow_run_id: str | None = None,
+        *,
+        context_inputs: Mapping[str, Any] | None = None,
     ) -> dict[str, str]:
         """Run the configured workflow synchronously."""
         run_id = str(flow_run_id or uuid4().hex[:12]).strip() or uuid4().hex[:12]
+        context = None
+        if self.context_configuration is not None:
+            context = self.context_configuration.resolve(context_inputs)
+        elif context_inputs is not None:
+            raise ContextValidationError("Runtime context is not configured")
 
         return self._kickoff_traced(
             inputs,
             run_id,
+            context,
             langsmith_extra=build_workflow_trace_extra(self.definition.name, run_id),
         )
 
@@ -65,6 +76,7 @@ class LatestAiDevelopmentWorkflow:
         self,
         inputs: Mapping[str, Any],
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, str]:
         """Run the workflow inside one LangSmith parent trace."""
         values = dict(inputs)
@@ -82,6 +94,7 @@ class LatestAiDevelopmentWorkflow:
                 stage,
                 values,
                 flow_run_id,
+                context,
                 langsmith_extra=build_stage_trace_extra(
                     self.definition.name,
                     stage,
@@ -105,6 +118,7 @@ class LatestAiDevelopmentWorkflow:
         stage: StageDefinition,
         values: Mapping[str, Any],
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Run one workflow stage inside a LangSmith child trace."""
         self._validate_stage_inputs(stage, values)
@@ -119,9 +133,9 @@ class LatestAiDevelopmentWorkflow:
         )
 
         if stage.execution == "parallel":
-            produced_values = self._run_parallel_stage(stage, stage_values, flow_run_id)
+            produced_values = self._run_parallel_stage(stage, stage_values, flow_run_id, context)
         else:
-            produced_values = self._run_sequential_stage(stage, stage_values, flow_run_id)
+            produced_values = self._run_sequential_stage(stage, stage_values, flow_run_id, context)
 
         stage_values.update(produced_values)
 
@@ -140,6 +154,7 @@ class LatestAiDevelopmentWorkflow:
         stage: StageDefinition,
         stage_values: dict[str, Any],
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Run every agent in a stage at the same time and collect outputs."""
         stage_inputs = dict(stage_values)
@@ -155,6 +170,7 @@ class LatestAiDevelopmentWorkflow:
                     stage_inputs,
                     stage.name,
                     flow_run_id,
+                    context,
                 )
                 futures.append(future)
 
@@ -169,6 +185,7 @@ class LatestAiDevelopmentWorkflow:
         stage: StageDefinition,
         stage_values: dict[str, Any],
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Run stage agents one by one and pass each output to the next agent."""
         produced_values: dict[str, Any] = {}
@@ -179,6 +196,7 @@ class LatestAiDevelopmentWorkflow:
                 stage_values,
                 stage.name,
                 flow_run_id,
+                context,
             )
             produced_values.update(agent_outputs)
             stage_values.update(agent_outputs)
@@ -191,6 +209,7 @@ class LatestAiDevelopmentWorkflow:
         values: Mapping[str, Any],
         stage_name: str,
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Run one agent with clear LangSmith trace metadata."""
         return self._run_agent(
@@ -198,6 +217,7 @@ class LatestAiDevelopmentWorkflow:
             values,
             stage_name,
             flow_run_id,
+            context,
             langsmith_extra=build_agent_trace_extra(
                 self.definition.name,
                 stage_name,
@@ -213,6 +233,7 @@ class LatestAiDevelopmentWorkflow:
         values: Mapping[str, Any],
         stage_name: str,
         flow_run_id: str,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Run one agent inside a LangSmith child trace."""
         definition = self.agent_definitions[agent_name]
@@ -230,6 +251,7 @@ class LatestAiDevelopmentWorkflow:
                 {"messages": [{"role": "user", "content": prompt}]},
                 config=agent_config,
                 validate_result=lambda result: validate_agent_result(definition, result, values),
+                **({"context": context} if context is not None else {}),
             )
         except Exception as exc:
             reason = str(exc).strip() or type(exc).__name__

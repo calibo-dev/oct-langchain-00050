@@ -17,6 +17,8 @@ from latest_ai_development.connections.config import load_connections_configurat
 from latest_ai_development.connections.factory import build_connection_registry
 from latest_ai_development.connections.registry import ConnectionRegistry
 from latest_ai_development.connections.schema import ConnectionConfigurations
+from latest_ai_development.context.config import load_context_configuration
+from latest_ai_development.context.runtime import ContextRuntime
 from latest_ai_development.core.container import ApplicationContainer
 from latest_ai_development.core.logging_config import configure_logging
 from latest_ai_development.core.settings import Settings, get_settings
@@ -52,6 +54,12 @@ class ApplicationContainerBuilder:
         workflow_definition = self._load_workflow()
         logger.debug("\n\nLoaded workflow definition:\n%s", workflow_definition)
         agent_definitions = self._load_active_agents(workflow_definition)
+        context_configuration = load_context_configuration()
+        if context_configuration is not None:
+            if "context" in workflow_definition.inputs:
+                raise ValueError("Workflow input 'context' conflicts with enabled runtime context")
+            for definition in agent_definitions:
+                context_configuration.validate_prompt(definition.system_prompt)
         logger.debug("\n\nLoaded active agent definitions:\n%s", agent_definitions)
         model_references = self._find_active_models(agent_definitions)
         logger.debug("\n\nResolved active model references:\n%s", model_references)
@@ -90,12 +98,14 @@ class ApplicationContainerBuilder:
             agent_definitions,
             model_registry,
             tool_registry,
+            context_configuration,
         )
         logger.debug("\n\nBuilt agent registry:\n%s", agent_registry)
         workflow = self._build_workflow(
             workflow_definition,
             agent_definitions,
             agent_registry,
+            context_configuration,
         )
         logger.debug("\n\nBuilt workflow:\n%s", workflow)
 
@@ -237,12 +247,14 @@ class ApplicationContainerBuilder:
         definitions: tuple[AgentDefinition, ...],
         model_registry: ModelRegistry,
         tool_registry: ToolRegistry,
+        context_configuration: ContextRuntime | None = None,
     ) -> AgentRegistry:
         """Create runtime LangChain agents."""
         registry = build_agent_registry(
             definitions,
             model_registry,
             tool_registry,
+            context_configuration,
         )
         logger.info("Agent objects created count=%s", registry.count())
         return registry
@@ -252,10 +264,12 @@ class ApplicationContainerBuilder:
         definition: WorkflowDefinition,
         agent_definitions: tuple[AgentDefinition, ...],
         agent_registry: AgentRegistry,
+        context_configuration: ContextRuntime | None = None,
     ) -> LatestAiDevelopmentWorkflow:
         """Create the workflow used by API requests."""
         return LatestAiDevelopmentWorkflow(
             definition=definition,
             agent_definitions=agent_definitions,
             agent_registry=agent_registry,
+            context_configuration=context_configuration,
         )

@@ -57,7 +57,9 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.workflow = container.workflow
 
-    api_router = build_api_router(container.workflow_definition)
+    api_router = build_api_router(
+        container.workflow_definition, container.workflow.context_configuration
+    )
     app.include_router(api_router)
     if api_root_path:
         app.include_router(api_router, prefix=api_root_path, include_in_schema=False)

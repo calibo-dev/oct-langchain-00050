@@ -1,0 +1,17 @@
+runtime_context:
+  enabled: true
+  read_only: true
+  fields:
+    locale:
+      type: string
+      source: request.context.locale
+      default: en
+    timezone:
+      type: string
+      source: request.context.timezone
+      default: UTC
+    detail_level:
+      type: string
+      source: request.context.detail_level
+      default: brief
+      allowed_values: [brief, detailed]

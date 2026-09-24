@@ -98,6 +98,7 @@ class AgentRuntime:
         config: Mapping[str, Any] | None = None,
         *,
         validate_result: Callable[[Any], Any] | None = None,
+        context: Any = None,
     ) -> Any:
         """Try models until output is valid, stopping immediately on tool failure."""
         last_error: Exception | None = None
@@ -109,7 +110,8 @@ class AgentRuntime:
                 agent_index > 0,
             )
             try:
-                result = agent.invoke(inputs, config=agent_config)
+                context_options = {"context": context} if context is not None else {}
+                result = agent.invoke(inputs, config=agent_config, **context_options)
                 if isinstance(result, Mapping):
                     _raise_for_tool_error(result.get("messages", []))
                 return validate_result(result) if validate_result is not None else result
