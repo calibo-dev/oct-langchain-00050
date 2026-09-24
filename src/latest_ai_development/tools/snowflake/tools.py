@@ -1,25 +1,39 @@
-"""Build dynamic Snowflake tools and execute their metadata or SQL requests."""
+"""Validate, build, and execute dynamic Snowflake tools."""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from latest_ai_development.tools.snowflake.connections.connection import (
-    SnowflakeConnectionManager,
-)
-from latest_ai_development.tools.snowflake.tools.schema import SnowflakeToolDefinition
+from latest_ai_development.tools.schema import BaseToolDefinition
+from latest_ai_development.tools.snowflake.connections import SnowflakeConnectionManager
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_ROW_LIMIT = 1000
 MAX_ROW_LIMIT = 5000
 MetadataScope = Literal["auto", "databases", "schemas", "tables", "columns"]
+
+
+class SnowflakeToolDefinition(BaseToolDefinition):
+    """One Snowflake tool mapped to a reusable connection by name."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    connector: Literal["snowflake"]
+
+
+def validate_snowflake_tool_definition(
+    raw_definition: Mapping[str, Any],
+) -> SnowflakeToolDefinition:
+    """Validate one Snowflake tool selected by the generic dispatcher."""
+    return SnowflakeToolDefinition.model_validate(dict(raw_definition))
 
 
 class SnowflakeToolInput(BaseModel):

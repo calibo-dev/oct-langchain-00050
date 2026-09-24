@@ -31,8 +31,8 @@ src/latest_ai_development/
 ├── tools/                  # Discovery, shared contracts and tool factories
 │   └── snowflake/
 │       ├── plugin.py       # Connector validation and construction entry point
-│       ├── connections/    # Schemas, PAT resolution and cached connections
-│       └── tools/          # Schemas, metadata discovery and SQL execution
+│       ├── connections.py  # Schemas, PAT resolution and cached connections
+│       └── tools.py        # Schemas, metadata discovery and SQL execution
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
     ├── agents.yaml
@@ -51,8 +51,8 @@ lookup. Connector-specific implementations stay inside connector folders.
 Add `tools/<connector>/plugin.py` exporting `plugin`, an instance of
 `ConnectorPlugin` from `tools/base.py`. Its name must match the folder. It supplies
 four functions: `validate_connections`, `validate_tool`, `build_manager`, and
-`build_tool`. Keep all connector-specific schemas, validators and runtime code
-under that folder, following Snowflake's layout.
+`build_tool`. Keep connector-specific connection code in `connections.py` and
+tool code in `tools.py`, following Snowflake's layout.
 
 Add connection records to `config/tools_connections.yaml` and set their
 `connector` value to the plugin name. Add tool descriptions to

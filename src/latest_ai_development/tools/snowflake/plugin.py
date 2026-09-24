@@ -8,16 +8,16 @@ from latest_ai_development.connections.base import ConnectionManager
 from latest_ai_development.core.settings import Settings
 from latest_ai_development.tools.base import ConnectorPlugin
 from latest_ai_development.tools.schema import BaseToolDefinition
-from latest_ai_development.tools.snowflake.connections.connection import SnowflakeConnectionManager
-from latest_ai_development.tools.snowflake.connections.schema import (
+from latest_ai_development.tools.snowflake.connections import (
+    SnowflakeConnectionManager,
     SnowflakeConnectionsConfiguration,
-)
-from latest_ai_development.tools.snowflake.connections.validator import (
     validate_snowflake_connections_configuration,
 )
-from latest_ai_development.tools.snowflake.tools.schema import SnowflakeToolDefinition
-from latest_ai_development.tools.snowflake.tools.tools import create_snowflake_tool
-from latest_ai_development.tools.snowflake.tools.validator import validate_snowflake_tool_definition
+from latest_ai_development.tools.snowflake.tools import (
+    SnowflakeToolDefinition,
+    create_snowflake_tool,
+    validate_snowflake_tool_definition,
+)
 
 
 def build_manager(configuration: BaseModel) -> SnowflakeConnectionManager:
