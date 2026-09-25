@@ -705,7 +705,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
-    { name = "snowflake-connector-python" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
@@ -716,6 +715,9 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+snowflake = [
+    { name = "snowflake-connector-python" },
 ]
 
 [package.metadata]
@@ -741,11 +743,11 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.7" },
-    { name = "snowflake-connector-python", specifier = ">=3.12,<4" },
+    { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=3.12,<4" },
     { name = "typing-extensions", specifier = ">=4.12.0" },
     { name = "uvicorn", specifier = ">=0.34.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["snowflake", "dev"]
 
 [[package]]
 name = "librt"

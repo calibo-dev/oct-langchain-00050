@@ -1,5 +1,6 @@
 tools:
   - name: hospital_management_agentic_tool
+    operation: database
     displayName: Hospital Management Agentic Tool
     connectionName: hospital_management_connection
     description: Provides controlled read-only access to hospital data and metadata in the configured Snowflake database and schema.

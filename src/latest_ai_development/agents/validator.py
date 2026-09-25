@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from latest_ai_development.agents.schema import AgentDefinition
 from latest_ai_development.models.config import model_exists
 from latest_ai_development.models.schema import ModelsConfiguration
-from latest_ai_development.tools.config import tool_exists
-from latest_ai_development.tools.schema import ToolsConfiguration
 
 
 def validate_agents_configuration(
     definitions: tuple[AgentDefinition, ...],
     models_configuration: ModelsConfiguration,
-    tools_configuration: ToolsConfiguration,
+    tool_names: Collection[str],
 ) -> None:
     """Ensure every agent references configured models and tools."""
     errors: list[str] = []
 
     for definition in definitions:
         _validate_agent_models(definition, models_configuration, errors)
-        _validate_agent_tools(definition, tools_configuration, errors)
+        _validate_agent_tools(definition, tool_names, errors)
 
     if errors:
         details = _format_errors(errors)
@@ -50,12 +50,12 @@ def _validate_agent_models(
 
 def _validate_agent_tools(
     definition: AgentDefinition,
-    tools_configuration: ToolsConfiguration,
+    tool_names: Collection[str],
     errors: list[str],
 ) -> None:
     """Check that every configured tool exists in connector configuration."""
     for tool_name in definition.tools:
-        if tool_exists(tools_configuration, tool_name):
+        if tool_name in tool_names:
             continue
 
         errors.append(f"agent '{definition.name}' references unknown tool '{tool_name}'")

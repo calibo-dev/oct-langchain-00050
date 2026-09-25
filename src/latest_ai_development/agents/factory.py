@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from langchain.agents import create_agent
@@ -18,7 +19,6 @@ from latest_ai_development.agents.schema import AgentDefinition
 from latest_ai_development.context.middleware import ContextPromptMiddleware
 from latest_ai_development.context.runtime import CONTEXT_REFERENCE, ContextRuntime
 from latest_ai_development.models.registry import ModelRegistry
-from latest_ai_development.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def build_agent_registry(
     definitions: tuple[AgentDefinition, ...],
     model_registry: ModelRegistry,
-    tool_registry: ToolRegistry,
+    tool_registry: Mapping[str, Any],
     context_configuration: ContextRuntime | None = None,
 ) -> AgentRegistry:
     """Create every configured primary/fallback agent and return one registry."""
@@ -60,14 +60,14 @@ def build_agent_registry(
 
 def _create_agent_runtime(
     model_registry: ModelRegistry,
-    tool_registry: ToolRegistry,
+    tool_registry: Mapping[str, Any],
     definition: AgentDefinition,
     context_configuration: ContextRuntime | None = None,
 ) -> AgentRuntime:
     """Create primary and fallback LangChain agent objects during startup."""
     runtime_agents: list[Any] = []
     model_names: list[str] = []
-    tools = tool_registry.get(definition.tools)
+    tools = tuple(tool_registry[name] for name in definition.tools)
     context_options: dict[str, Any] = {}
     if context_configuration is not None:
         context_configuration.validate_prompt(definition.system_prompt)

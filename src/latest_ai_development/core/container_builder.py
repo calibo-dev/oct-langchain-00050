@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 from latest_ai_development.agents.config import (
     collect_agent_model_references,
@@ -13,15 +14,11 @@ from latest_ai_development.agents.config import (
 from latest_ai_development.agents.factory import build_agent_registry
 from latest_ai_development.agents.registry import AgentRegistry
 from latest_ai_development.agents.schema import AgentDefinition, AgentModel
-from latest_ai_development.connections.config import load_connections_configuration
-from latest_ai_development.connections.factory import build_connection_registry
-from latest_ai_development.connections.registry import ConnectionRegistry
-from latest_ai_development.connections.schema import ConnectionConfigurations
 from latest_ai_development.context.config import load_context_configuration
 from latest_ai_development.context.runtime import ContextRuntime
 from latest_ai_development.core.container import ApplicationContainer
 from latest_ai_development.core.logging_config import configure_logging
-from latest_ai_development.core.settings import Settings, get_settings
+from latest_ai_development.core.settings import CONFIG_DIR, Settings, get_settings
 from latest_ai_development.core.settings_validator import validate_settings_configuration
 from latest_ai_development.models.config import load_models_configuration
 from latest_ai_development.models.factory import build_model_registry
@@ -29,15 +26,15 @@ from latest_ai_development.models.registry import ModelRegistry
 from latest_ai_development.models.schema import ModelsConfiguration
 from latest_ai_development.stages.config import load_workflow_definition
 from latest_ai_development.stages.schema import WorkflowDefinition
-from latest_ai_development.tools.config import (
-    collect_connection_names,
-    load_tools_configuration,
-)
-from latest_ai_development.tools.factory import build_tool_registry
-from latest_ai_development.tools.registry import ToolRegistry
-from latest_ai_development.tools.schema import ToolsConfiguration
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 from latest_ai_development.workflow.validator import validate_workflow_configuration
+
+if TYPE_CHECKING:
+    from latest_ai_development.connections.manager import (
+        ConnectionConfigurations,
+        ConnectionRegistry,
+    )
+    from latest_ai_development.tools.manager import ToolsConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -80,16 +77,15 @@ class ApplicationContainerBuilder:
             tools_configuration,
         )
 
-        connection_registry = self._build_connections(connections_configuration)
-        logger.debug("\n\nBuilt connection registry:\n%s", connection_registry)
         model_registry = self._build_models(
             settings,
             models_configuration,
             model_references,
         )
         logger.debug("\n\nBuilt model registry:\n%s", model_registry)
+        connection_registry = self._build_connections(connections_configuration)
+        logger.debug("\n\nBuilt connection registry:\n%s", connection_registry)
         tool_registry = self._build_tools(
-            settings,
             tools_configuration,
             connection_registry,
         )
@@ -182,39 +178,68 @@ class ApplicationContainerBuilder:
     def _load_active_tools(
         self,
         tool_names: tuple[str, ...],
-    ) -> ToolsConfiguration:
+    ) -> ToolsConfiguration | None:
         """Load validated configuration for active tools."""
-        return load_tools_configuration(tool_names)
+        if not tool_names:
+            return None
+        try:
+            from latest_ai_development.tools.manager import load_tools_configuration
+        except ModuleNotFoundError as exc:
+            raise ValueError("Active agents require the tool manager and its dependencies") from exc
+        return load_tools_configuration(CONFIG_DIR / "tools_info.yaml", tool_names)
 
     def _load_active_connections(
         self,
-        tools_configuration: ToolsConfiguration,
+        tools_configuration: ToolsConfiguration | None,
     ) -> ConnectionConfigurations:
         """Load connections referenced by active tools."""
+        if tools_configuration is None:
+            return {}
+        from latest_ai_development.tools.manager import collect_connection_names
+
         connection_names = collect_connection_names(tools_configuration)
-        return load_connections_configuration(connection_names)
+        if not connection_names:
+            return {}
+        try:
+            from latest_ai_development.connections.manager import load_connections_configuration
+        except ModuleNotFoundError as exc:
+            raise ValueError(
+                "Active tools require the connection manager and its dependencies"
+            ) from exc
+        return load_connections_configuration(
+            CONFIG_DIR / "tools_connections.yaml", connection_names
+        )
 
     def _validate_workflow(
         self,
         workflow_definition: WorkflowDefinition,
         agent_definitions: tuple[AgentDefinition, ...],
         models_configuration: ModelsConfiguration,
-        tools_configuration: ToolsConfiguration,
+        tools_configuration: ToolsConfiguration | None,
     ) -> None:
         """Validate references before constructing external runtime objects."""
         validate_workflow_configuration(
             workflow_definition,
             agent_definitions,
             models_configuration,
-            tools_configuration,
+            {tool.name for tool in tools_configuration.tools} if tools_configuration else set(),
         )
 
     def _build_connections(
         self,
         configuration: ConnectionConfigurations,
-    ) -> ConnectionRegistry:
+    ) -> ConnectionRegistry | None:
         """Create connection managers used by active tools."""
-        return build_connection_registry(configuration)
+        if not configuration:
+            return None
+        from latest_ai_development.connections.manager import build_connection_registry
+
+        def resolve_secret(secret_name: str) -> str | None:
+            from latest_ai_development.core.secrets_manager import SecretsManager
+
+            return SecretsManager().get_secret(secret_name)
+
+        return build_connection_registry(configuration, resolve_secret)
 
     def _build_models(
         self,
@@ -229,24 +254,27 @@ class ApplicationContainerBuilder:
 
     def _build_tools(
         self,
-        settings: Settings,
-        configuration: ToolsConfiguration,
-        connection_registry: ConnectionRegistry,
-    ) -> ToolRegistry:
+        configuration: ToolsConfiguration | None,
+        connection_registry: ConnectionRegistry | None,
+    ) -> dict[str, Any]:
         """Create runtime LangChain tools used by active agents."""
+        if configuration is None or not configuration.tools:
+            return {}
+        from latest_ai_development.tools.adapter import adapt_tools
+        from latest_ai_development.tools.manager import build_tool_registry
+
         registry = build_tool_registry(
-            settings,
             configuration,
-            connection_registry,
+            connection_registry.get if connection_registry is not None else None,
         )
         logger.info("Tool objects created count=%s", registry.count())
-        return registry
+        return adapt_tools(registry)
 
     def _build_agents(
         self,
         definitions: tuple[AgentDefinition, ...],
         model_registry: ModelRegistry,
-        tool_registry: ToolRegistry,
+        tool_registry: dict[str, Any],
         context_configuration: ContextRuntime | None = None,
     ) -> AgentRegistry:
         """Create runtime LangChain agents."""

@@ -29,7 +29,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         # Connector resources are opened lazily and shared by configured tools.
         # Closing them here keeps shutdown deterministic in servers and tests.
-        app.state.container.connection_registry.close()
+        connection_registry = app.state.container.connection_registry
+        if connection_registry is not None:
+            connection_registry.close()
 
 
 def create_app() -> FastAPI:

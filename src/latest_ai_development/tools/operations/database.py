@@ -1,18 +1,15 @@
-"""Connector-neutral LangChain tools for database queries and metadata."""
+"""Framework-neutral database query and metadata operations."""
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Mapping
 from typing import Any
 
-from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from latest_ai_development.connections.base import DatabaseConnectionManager, MetadataScope
-from latest_ai_development.core.errors import ToolExecutionError
-from latest_ai_development.tools.schema import BaseToolDefinition
+from ...connections.manager import DatabaseConnectionManager, MetadataScope
+from ..manager import ToolConfiguration, ToolDefinition, ToolOperation, ToolOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +17,12 @@ DEFAULT_ROW_LIMIT = 1000
 MAX_ROW_LIMIT = 5000
 
 
-class DatabaseToolDefinition(BaseToolDefinition):
+class DatabaseToolConfiguration(ToolConfiguration):
     """One database tool mapped to a connector-owned connection."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    connection_name: str = Field(alias="connectionName", min_length=1)
 
 
 class DatabaseToolInput(BaseModel):
@@ -54,16 +53,18 @@ class DatabaseToolInput(BaseModel):
 
 def validate_database_tool_definition(
     raw_definition: Mapping[str, Any],
-) -> DatabaseToolDefinition:
-    """Validate a database tool after its connector has been resolved."""
-    return DatabaseToolDefinition.model_validate(dict(raw_definition))
+) -> DatabaseToolConfiguration:
+    """Validate settings for a database operation."""
+    return DatabaseToolConfiguration.model_validate(dict(raw_definition))
 
 
 def create_database_tool(
-    definition: DatabaseToolDefinition,
+    definition: DatabaseToolConfiguration,
     connection_manager: DatabaseConnectionManager,
-) -> StructuredTool:
-    """Create a LangChain tool backed by a connector-managed connection."""
+) -> ToolDefinition:
+    """Bind query and metadata operations to a compatible database manager."""
+    if not isinstance(connection_manager, DatabaseConnectionManager):
+        raise TypeError(f"Tool '{definition.name}' requires a database connection manager")
 
     def run_database_tool(
         query: str | None = None,
@@ -73,7 +74,7 @@ def create_database_tool(
         schema_name: str | None = None,
         table_name: str | None = None,
         search_term: str | None = None,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Execute a query or discover metadata through the selected connector."""
         normalized_query = str(query or "").strip()
 
@@ -99,24 +100,24 @@ def create_database_tool(
                 "query_execution_failed" if normalized_query else "metadata_discovery_failed"
             )
             logger.exception(
-                "Database operation failed tool=%s connector=%s",
+                "Database operation failed tool=%s connection=%s",
                 definition.name,
-                definition.connector,
+                definition.connection_name,
             )
-            raise ToolExecutionError(definition.name, operation) from exc
+            raise ToolOperationError(operation) from exc
 
-        return json.dumps(result, default=str)
+        return result
 
-    return StructuredTool.from_function(
-        func=run_database_tool,
+    return ToolDefinition(
+        execute=run_database_tool,
         name=definition.name,
         description=_build_tool_description(definition, connection_manager),
-        args_schema=DatabaseToolInput,
+        input_schema=DatabaseToolInput,
     )
 
 
 def _build_tool_description(
-    definition: DatabaseToolDefinition,
+    definition: DatabaseToolConfiguration,
     connection_manager: DatabaseConnectionManager,
 ) -> str:
     """Build connector-neutral instructions shown to the LLM."""
@@ -127,7 +128,6 @@ def _build_tool_description(
         f"Purpose: {definition.purpose.strip()}",
         "",
         f"Connection: {definition.connection_name}",
-        f"Connector: {definition.connector}",
     ]
 
     for label, value in context.items():
@@ -151,8 +151,11 @@ def _build_tool_description(
     return "\n".join(lines)
 
 
-__all__ = [
-    "DatabaseToolDefinition",
-    "create_database_tool",
-    "validate_database_tool_definition",
-]
+operation = ToolOperation(
+    name="database",
+    validate_tool=validate_database_tool_definition,
+    build_tool=create_database_tool,
+)
+
+
+__all__ = ["operation"]

@@ -5,17 +5,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from latest_ai_development.connections.base import MetadataScope
-from latest_ai_development.connections.config import load_connections_configuration
-from latest_ai_development.tools.config import (
+from latest_ai_development.connections.manager import (
+    MetadataScope,
+    discover_providers,
+    load_connections_configuration,
+)
+from latest_ai_development.core.settings import CONFIG_DIR
+from latest_ai_development.tools.adapter import adapt_tool
+from latest_ai_development.tools.manager import (
     collect_connection_names,
     load_tools_configuration,
 )
-from latest_ai_development.tools.database_tools import (
-    DatabaseToolDefinition,
+from latest_ai_development.tools.operations.database import (
+    DatabaseToolConfiguration,
     create_database_tool,
 )
-from latest_ai_development.tools.discovery import discover_connectors
 
 
 class FakeDatabaseManager:
@@ -67,28 +71,30 @@ class FakeDatabaseManager:
 
 def test_configuration_resolves_dynamic_snowflake_connector() -> None:
     """Resolve tool configuration through the discovered connector module."""
-    plugins = discover_connectors()
-    tools = load_tools_configuration()
-    connections = load_connections_configuration(collect_connection_names(tools))
+    plugins = discover_providers()
+    tools = load_tools_configuration(CONFIG_DIR / "tools_info.yaml")
+    connections = load_connections_configuration(
+        CONFIG_DIR / "tools_connections.yaml", collect_connection_names(tools)
+    )
 
     assert tuple(plugins) == ("snowflake",)
-    assert type(tools.tools[0]).__name__ == "DatabaseToolDefinition"
-    snowflake_connections = connections["snowflake"].model_dump()["connections"]
+    assert type(tools.tools[0]).__name__ == "DatabaseToolConfiguration"
+    snowflake_connections = connections["snowflake"].configuration.model_dump()["connections"]
     assert snowflake_connections[0]["connector"] == "snowflake"
 
 
 def test_database_tool_delegates_query_and_metadata_operations() -> None:
     """Keep query and metadata behavior independent of a concrete connector."""
-    definition = DatabaseToolDefinition.model_validate(
+    definition = DatabaseToolConfiguration.model_validate(
         {
             "name": "database_tool",
-            "connector": "testdb",
+            "operation": "database",
             "connectionName": "test_connection",
             "description": "Query test data.",
             "purpose": "Test generic database behavior.",
         }
     )
-    tool = create_database_tool(definition, FakeDatabaseManager())
+    tool = adapt_tool(create_database_tool(definition, FakeDatabaseManager()))
     assert tool.func is not None
 
     query_result = json.loads(tool.func(query="SELECT 1", row_limit=10))

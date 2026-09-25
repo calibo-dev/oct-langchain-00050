@@ -18,19 +18,7 @@ from typing import Any, Literal, Self
 import snowflake.connector
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from latest_ai_development.connections.base import (
-    ConnectionManager,
-    MetadataScope,
-)
-from latest_ai_development.core.secrets_manager import SecretsManager
-from latest_ai_development.core.settings import Settings
-from latest_ai_development.tools.base import ConnectorPlugin
-from latest_ai_development.tools.database_tools import (
-    DatabaseToolDefinition,
-    create_database_tool,
-    validate_database_tool_definition,
-)
-from latest_ai_development.tools.schema import BaseToolDefinition
+from ..manager import ConnectionProvider, MetadataScope, SecretResolver
 
 logger = logging.getLogger(__name__)
 
@@ -129,11 +117,16 @@ def validate_snowflake_connections_configuration(
 class SnowflakeConnectionManager:
     """Resolve credentials and cache connections by configured connection name."""
 
-    def __init__(self, definitions: Iterable[SnowflakeConnectionDefinition]) -> None:
+    def __init__(
+        self,
+        definitions: Iterable[SnowflakeConnectionDefinition],
+        resolve_secret: SecretResolver | None = None,
+    ) -> None:
         """Create a manager from validated connection definitions."""
         self._definitions = {definition.name: definition for definition in definitions}
         self._connections: dict[str, Any] = {}
         self._lock = RLock()
+        self._resolve_secret = resolve_secret
 
     def get_definition(self, connection_name: str) -> SnowflakeConnectionDefinition:
         """Return a connection definition by its stable YAML name."""
@@ -256,12 +249,12 @@ class SnowflakeConnectionManager:
                     connection.close()
                     logger.info("Snowflake connection closed connection=%s", name)
 
-    @staticmethod
     def _build_connection_parameters(
+        self,
         definition: SnowflakeConnectionDefinition,
     ) -> dict[str, Any]:
         """Translate one definition into Snowflake connector keyword arguments."""
-        pat_token = _resolve_pat_token(definition)
+        pat_token = _resolve_pat_token(definition, self._resolve_secret)
         parameters: dict[str, Any] = {
             "account": definition.account,
             "warehouse": definition.warehouse,
@@ -285,7 +278,10 @@ def _read_environment_value(variable_name: str) -> str:
     return str(os.getenv(variable_name) or "").strip()
 
 
-def _resolve_pat_token(definition: SnowflakeConnectionDefinition) -> str:
+def _resolve_pat_token(
+    definition: SnowflakeConnectionDefinition,
+    resolve_secret: SecretResolver | None = None,
+) -> str:
     """Resolve a PAT from exactly one configured environment-variable source."""
     authentication = definition.authentication
     direct_pat = _read_environment_value(authentication.direct_pat_token_env)
@@ -305,7 +301,9 @@ def _resolve_pat_token(definition: SnowflakeConnectionDefinition) -> str:
     if direct_pat:
         return direct_pat
 
-    secret_value = SecretsManager().get_secret(secret_name)
+    if resolve_secret is None:
+        raise RuntimeError("Snowflake secret authentication requires a secret resolver")
+    secret_value = resolve_secret(secret_name)
     pat_token = str(secret_value or "").strip()
     if not pat_token:
         raise RuntimeError(
@@ -471,34 +469,21 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def build_manager(configuration: BaseModel) -> SnowflakeConnectionManager:
+def build_manager(
+    configuration: BaseModel,
+    resolve_secret: SecretResolver | None = None,
+) -> SnowflakeConnectionManager:
     """Build one manager holding all active Snowflake connections."""
     if not isinstance(configuration, SnowflakeConnectionsConfiguration):
         raise TypeError("Snowflake requires SnowflakeConnectionsConfiguration")
-    return SnowflakeConnectionManager(configuration.connections)
+    return SnowflakeConnectionManager(configuration.connections, resolve_secret)
 
 
-def build_tool(
-    settings: Settings,
-    definition: BaseToolDefinition,
-    manager: ConnectionManager,
-) -> Any:
-    """Bind the generic database tool to a Snowflake connection manager."""
-    del settings  # Reserved for connectors whose tools require application settings.
-    if not isinstance(definition, DatabaseToolDefinition):
-        raise TypeError("Snowflake requires DatabaseToolDefinition")
-    if not isinstance(manager, SnowflakeConnectionManager):
-        raise TypeError("Snowflake requires SnowflakeConnectionManager")
-    return create_database_tool(definition=definition, connection_manager=manager)
-
-
-plugin = ConnectorPlugin(
+provider = ConnectionProvider(
     name="snowflake",
     validate_connections=validate_snowflake_connections_configuration,
-    validate_tool=validate_database_tool_definition,
     build_manager=build_manager,
-    build_tool=build_tool,
 )
 
 
-__all__ = ["plugin"]
+__all__ = ["provider"]
