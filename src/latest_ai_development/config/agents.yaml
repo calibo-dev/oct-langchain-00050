@@ -74,9 +74,19 @@ agents:
       Requirements:
       - If is_hospital_query is false, do not call the tool. Set metadata_status
         to skipped and return empty metadata values.
-      - Discover metadata from HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA.
+      - Discover table and column metadata from HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA.
       - Inspect all potentially relevant tables, views, columns, and data types.
       - Identify primary-key and foreign-key relationships when they are available.
+      - Snowflake does not provide INFORMATION_SCHEMA.KEY_COLUMN_USAGE. Never query
+        that view or assume metadata views from other database systems exist.
+      - For primary-key columns, call the tool with query set to
+        SHOW PRIMARY KEYS IN SCHEMA HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA;
+      - For foreign-key column mappings, call the tool separately with query set to
+        SHOW IMPORTED KEYS IN SCHEMA HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA;
+      - Use the returned key column names and key_sequence to describe relationships,
+        including composite keys. Do not infer join columns from constraint names.
+      - If a key-discovery command succeeds with no rows, report that no declared
+        keys were returned. Do not invent relationships or try KEY_COLUMN_USAGE.
       - Do not assume that a table or column exists.
       - Do not retrieve unnecessary patient-level data during metadata discovery.
       - Do not generate the final SQL query.

@@ -1,61 +1,44 @@
-"""Validate, create, and reuse Snowflake connections declared in YAML.
-
-Non-secret connection values live in ``tools_connections.yaml``. Each
-connection also declares two environment-variable names. One can contain a PAT
-directly; the other can contain the name of an AWS Secrets Manager or Azure Key
-Vault secret. Exactly one of those environment variables must be populated.
-"""
+"""Snowflake configuration, connections, query execution, and metadata discovery."""
 
 from __future__ import annotations
 
 import logging
 import os
 import re
-from collections.abc import Iterable, Mapping
-from threading import RLock
+from collections.abc import Callable
+from threading import Lock
 from typing import Any, Literal, Self
 
-import snowflake.connector
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .tools_manager import (
-    SecretResolver,
     ToolConfiguration,
     ToolDefinition,
     ToolIntegration,
-    ToolOperation,
-    ToolOperationError,
+    build_tool_description,
 )
-
-MetadataScope = Literal["auto", "databases", "schemas", "tables", "columns"]
 
 logger = logging.getLogger(__name__)
 
 
 class SnowflakeAuthentication(BaseModel):
-    """Environment-variable names that can provide a Snowflake PAT."""
+    """Environment-variable names for the direct PAT or secret-name source."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
 
-    direct_pat_token_env: str = Field(alias="directPatToken", min_length=1)
-    secret_env: str = Field(alias="secret", min_length=1)
-
-    @field_validator("direct_pat_token_env", "secret_env")
-    @classmethod
-    def normalize_environment_name(cls, value: str) -> str:
-        """Remove accidental surrounding whitespace from environment names."""
-        return value.strip()
+    direct_pat_token: str = Field(alias="directPatToken", min_length=1)
+    secret: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_distinct_environment_names(self) -> Self:
-        """The direct token and secret name must not use the same variable."""
-        if self.direct_pat_token_env == self.secret_env:
+    def validate_sources(self) -> Self:
+        if self.direct_pat_token == self.secret:
             raise ValueError("directPatToken and secret must reference different variables")
         return self
 
 
 class SnowflakeConnectionOptions(BaseModel):
-    """Optional Snowflake connector settings shared by connection users."""
+    """Connection options using the existing YAML field names."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -63,581 +46,617 @@ class SnowflakeConnectionOptions(BaseModel):
     login_timeout: int = Field(default=30, alias="loginTimeout", gt=0)
     network_timeout: int = Field(default=60, alias="networkTimeout", gt=0)
 
-    def as_connector_parameters(self) -> dict[str, Any]:
-        """Return names accepted by ``snowflake.connector.connect``."""
-        return self.model_dump()
 
+class SnowflakeConnectionConfiguration(BaseModel):
+    """Non-secret settings for one named Snowflake connection."""
 
-class SnowflakeConnectionDefinition(BaseModel):
-    """One reusable Snowflake connection declared in connection YAML."""
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     connector: Literal["snowflake"]
     account: str = Field(min_length=1)
-    host: str | None = None
+    user: str = Field(min_length=1)
     warehouse: str = Field(min_length=1)
+    host: str | None = None
     database: str | None = None
     schema_name: str | None = Field(default=None, alias="schema")
-    user: str = Field(min_length=1)
     authentication: SnowflakeAuthentication
     connection_options: SnowflakeConnectionOptions = Field(
-        default_factory=SnowflakeConnectionOptions,
-        alias="connectionOptions",
+        default_factory=SnowflakeConnectionOptions, alias="connectionOptions"
     )
 
     @field_validator("host", "database", "schema_name", mode="before")
     @classmethod
-    def normalize_optional_text(cls, value: str | None) -> str | None:
-        """Treat blank optional connection values as missing."""
+    def normalize_optional_values(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized_value = str(value).strip()
-        return normalized_value or None
+        return str(value).strip() or None
 
 
-class SnowflakeConnectionsConfiguration(BaseModel):
-    """Snowflake records selected from ``tools_connections.yaml``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    connections: list[SnowflakeConnectionDefinition] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_unique_connection_names(self) -> Self:
-        """Connection names are lookup keys and therefore must be unique."""
-        names = [connection.name for connection in self.connections]
-        if len(names) != len(set(names)):
-            raise ValueError("Snowflake connection names must be unique")
-        return self
-
-
-def validate_snowflake_connections_configuration(
-    raw_configuration: dict[str, Any],
-) -> SnowflakeConnectionsConfiguration:
-    """Convert connection YAML into checked Snowflake connection objects."""
-    try:
-        return SnowflakeConnectionsConfiguration.model_validate(raw_configuration)
-    except ValidationError as exc:
-        raise ValueError(f"Invalid tools_connections.yaml configuration:\n{exc}") from exc
-
-
-class SnowflakeConnectionManager:
-    """Resolve credentials and cache connections by configured connection name."""
+class SnowflakeConnection:
+    """Lazily open and reuse a client for one configured connection."""
 
     def __init__(
         self,
-        definitions: Iterable[SnowflakeConnectionDefinition],
-        resolve_secret: SecretResolver | None = None,
+        configuration: SnowflakeConnectionConfiguration,
+        resolve_secret: Callable[[str], str | None] | None = None,
     ) -> None:
-        """Create a manager from validated connection definitions."""
-        self._definitions = {definition.name: definition for definition in definitions}
-        self._connections: dict[str, Any] = {}
-        self._lock = RLock()
+        self.configuration = configuration
         self._resolve_secret = resolve_secret
+        self._connection: Any = None
+        self._lock = Lock()
 
-    def get_definition(self, connection_name: str) -> SnowflakeConnectionDefinition:
-        """Return a connection definition by its stable YAML name."""
-        try:
-            return self._definitions[connection_name]
-        except KeyError as exc:
-            raise KeyError(f"Snowflake connection '{connection_name}' is not configured") from exc
+    def _resolve_pat(self) -> str:
+        authentication = self.configuration.authentication
+        direct_pat = os.getenv(authentication.direct_pat_token, "").strip()
+        secret_name = os.getenv(authentication.secret, "").strip()
+        if bool(direct_pat) == bool(secret_name):
+            raise RuntimeError(
+                f"Connection '{self.configuration.name}' requires exactly one PAT source: "
+                f"{authentication.direct_pat_token} or {authentication.secret}"
+            )
+        if direct_pat:
+            return direct_pat
+        if self._resolve_secret is None:
+            raise RuntimeError("Snowflake secret authentication requires a secret resolver")
+        token = str(self._resolve_secret(secret_name) or "").strip()
+        if not token:
+            raise RuntimeError(
+                f"PAT secret for connection '{self.configuration.name}' resolved to an empty value"
+            )
+        return token
 
-    def get_connection(self, connection_name: str) -> Any:
-        """Return an open cached connection, creating it when first requested."""
-        definition = self.get_definition(connection_name)
-
-        # A single manager is shared by every tool. The lock prevents two agents
-        # from creating duplicate connections for the same name concurrently.
+    def get_connection(self) -> Any:
+        """Create a connection on first use, retaining it until closed."""
         with self._lock:
-            connection = self._connections.get(connection_name)
-            if connection is not None and not connection.is_closed():
-                return connection
+            if self._connection is not None and not self._connection.is_closed():
+                return self._connection
 
-            connection_parameters = self._build_connection_parameters(definition)
+            import snowflake.connector
+
+            configuration = self.configuration
+            parameters = {
+                "account": configuration.account,
+                "user": configuration.user,
+                "warehouse": configuration.warehouse,
+                "password": self._resolve_pat(),
+                **configuration.connection_options.model_dump(),
+            }
+            for key, value in (
+                ("host", configuration.host),
+                ("database", configuration.database),
+                ("schema", configuration.schema_name),
+            ):
+                if value:
+                    parameters[key] = value
             try:
-                connection = snowflake.connector.connect(**connection_parameters)
+                self._connection = snowflake.connector.connect(**parameters)
             except snowflake.connector.errors.DatabaseError as exc:
-                raise _friendly_connection_error(definition, exc) from exc
+                # Connector error details can include authentication values.
+                raise RuntimeError(
+                    f"Unable to open Snowflake connection '{configuration.name}'"
+                ) from exc
+            return self._connection
 
-            self._connections[connection_name] = connection
-            logger.info("Snowflake connection opened connection=%s", connection_name)
-            return connection
+    def close(self) -> None:
+        """Release this connection; repeated shutdown calls are harmless."""
+        with self._lock:
+            connection, self._connection = self._connection, None
+            if connection is not None and not connection.is_closed():
+                connection.close()
 
-    def get_connection_context(self, connection_name: str) -> dict[str, str | None]:
-        """Return non-secret Snowflake details for the generic tool description."""
-        definition = self.get_definition(connection_name)
-        return {
-            "Database": definition.database,
-            "Schema": definition.schema_name,
-        }
 
-    def execute_query(
+class SnowflakeToolInput(BaseModel):
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Optional Snowflake SQL query. "
+            "Leave empty to discover authorized Snowflake metadata before writing SQL."
+        ),
+    )
+    row_limit: int | None = Field(
+        default=1000,
+        description=(
+            "Maximum rows to return; defaults to 1000. Pass null for no tool-imposed limit."
+        ),
+    )
+    metadata_scope: str | None = Field(
+        default="auto",
+        description=(
+            "Metadata discovery scope when query is empty: auto, databases, schemas, "
+            "tables, or columns."
+        ),
+    )
+    database: str | None = Field(
+        default=None,
+        description="Optional Snowflake database name to inspect for schemas, tables, or columns.",
+    )
+    schema: str | None = Field(
+        default=None,
+        description="Optional Snowflake schema name to inspect for tables or columns.",
+    )
+    table_name: str | None = Field(
+        default=None,
+        description="Optional table name to inspect columns for.",
+    )
+    search_term: str | None = Field(
+        default=None,
+        description="Optional case-insensitive term used to filter discovered metadata names.",
+    )
+
+
+class SnowflakeTool:
+    """Portable Snowflake query and metadata tool using configured settings."""
+
+    args_schema: type[BaseModel] = SnowflakeToolInput
+
+    def __init__(
+        self, configuration: ToolConfiguration, connection: SnowflakeConnection
+    ) -> None:
+        if configuration.connection_name != connection.configuration.name:
+            raise ValueError(f"Tool '{configuration.name}' has a mismatched connection")
+        self.name = configuration.name
+        self.description = self._build_description(configuration, connection)
+        self._connection = connection
+
+    @staticmethod
+    def _build_description(
+        configuration: ToolConfiguration, connection: SnowflakeConnection
+    ) -> str:
+        details = connection.configuration
+        context = [
+            "Leave query empty to discover metadata before writing SQL.",
+            "Prefer fully qualified DATABASE.SCHEMA.TABLE names in SQL queries.",
+            "",
+            f"Connection: {details.name}",
+        ]
+        for label, value in (
+            ("Account", details.account),
+            ("Database", details.database),
+            ("Schema", details.schema_name),
+            ("Warehouse", details.warehouse),
+        ):
+            if value:
+                context.append(f"{label}: {value}")
+        return build_tool_description(configuration, context)
+
+    def close(self) -> None:
+        """Release the shared connection when the application stops."""
+        self._connection.close()
+
+    def _run(
         self,
-        connection_name: str,
-        query: str,
-        row_limit: int,
-    ) -> dict[str, Any]:
-        """Execute SQL using Snowflake syntax and return serializable rows."""
-        connection = self.get_connection(connection_name)
-        limited_query = _add_row_limit(query, row_limit)
+        query: str | None = None,
+        row_limit: int | None = 1000,
+        metadata_scope: str | None = "auto",
+        database: str | None = None,
+        schema: str | None = None,
+        table_name: str | None = None,
+        search_term: str | None = None,
+    ) -> str:
         logger.debug(
-            "Executing Snowflake SQL connection=%s query=%s",
-            connection_name,
-            limited_query,
+            "Snowflake tool input | tool=%s | query=%s | row_limit=%s | metadata_scope=%s | "
+            "database=%s | schema=%s | table_name=%s | search_term=%s",
+            self.name,
+            query or "",
+            row_limit,
+            metadata_scope,
+            database or "",
+            schema or "",
+            table_name or "",
+            search_term or "",
         )
+        query = (query or "").strip()
 
-        cursor = connection.cursor()
+        normalized_row_limit = self._normalize_row_limit(row_limit)
+
+        if not query:
+            return self._discover_metadata(
+                row_limit=normalized_row_limit,
+                metadata_scope=metadata_scope,
+                database=database,
+                schema=schema,
+                table_name=table_name,
+                search_term=search_term,
+            )
+
+        return self._execute_query(query=query, row_limit=normalized_row_limit)
+
+    def _execute_query(self, query: str, row_limit: int | None) -> str:
+        cursor = None
+
         try:
-            cursor.execute(limited_query)
-            if cursor.description is None:
-                return {
-                    "status": "success",
-                    "rows_affected": cursor.rowcount,
-                }
-            return _serialize_cursor_rows(cursor, row_limit)
-        finally:
-            cursor.close()
+            self._validate_read_only_query(query)
+            conn = self._connection.get_connection()
+            cursor = conn.cursor()
 
-    def discover_metadata(
+            if row_limit is not None and self._should_apply_row_limit(query):
+                query = f"{query.rstrip(';')} LIMIT {row_limit};"
+
+            logger.debug(
+                "Snowflake SQL query | tool=%s | query=%s",
+                self.name,
+                query,
+            )
+            cursor.execute(query)
+            if cursor.description is None:
+                affected = cursor.rowcount
+                affected_text = (
+                    str(affected)
+                    if affected is not None and affected >= 0
+                    else "unknown"
+                )
+                result = f"Query executed successfully. Rows affected: {affected_text}."
+                logger.debug(
+                    "Snowflake tool data returned | tool=%s | data=%s",
+                    self.name,
+                    result,
+                )
+                return result
+
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+
+            if not rows:
+                result = "Query executed successfully - 0 rows returned."
+                logger.debug(
+                    "Snowflake tool data returned | tool=%s | data=%s",
+                    self.name,
+                    result,
+                )
+                return result
+
+            df = pd.DataFrame(rows, columns=columns)
+            result = (
+                f"{len(rows)} row(s) returned:\n\n"
+                f"{df.to_string(index=False)}\n\n"
+                f"Columns: {', '.join(columns)}"
+            )
+            logger.debug(
+                "Snowflake tool data returned | tool=%s | data=%s",
+                self.name,
+                result,
+            )
+            return result
+
+        except Exception as exc:
+            logger.exception(
+                "Snowflake SQL execution failed | tool=%s | query=%s",
+                self.name,
+                query,
+            )
+            raise RuntimeError("query_execution_failed") from exc
+
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+    def _discover_metadata(
         self,
-        connection_name: str,
-        scope: MetadataScope,
-        row_limit: int,
+        *,
+        row_limit: int | None,
+        metadata_scope: str | None,
         database: str | None,
         schema: str | None,
         table_name: str | None,
         search_term: str | None,
-    ) -> dict[str, Any]:
-        """Discover Snowflake objects using INFORMATION_SCHEMA queries."""
-        definition = self.get_definition(connection_name)
-        selected_database = str(database or definition.database or "").strip()
-        selected_schema = str(schema or definition.schema_name or "").strip()
-        selected_table = str(table_name or "").strip()
-        selected_search_term = str(search_term or "").strip()
-        selected_scope = _resolve_metadata_scope(
-            scope,
-            selected_database,
-            selected_schema,
-            selected_table,
-        )
-        query = _build_metadata_query(
-            scope=selected_scope,
-            database=selected_database,
-            schema=selected_schema,
-            table_name=selected_table,
-            search_term=selected_search_term,
-            row_limit=row_limit,
-        )
+    ) -> str:
+        cursor = None
+        database = (database or self._connection.configuration.database or "").strip()
+        schema = (schema or self._connection.configuration.schema_name or "").strip()
+        table_name = (table_name or "").strip()
+        search_term = (search_term or "").strip()
+        scope = (metadata_scope or "auto").strip().lower()
+
         logger.debug(
-            "Discovering Snowflake metadata connection=%s scope=%s query=%s",
-            connection_name,
-            selected_scope,
-            query,
-        )
-
-        connection = self.get_connection(connection_name)
-        cursor = connection.cursor()
-        try:
-            cursor.execute(query)
-            return _serialize_cursor_rows(
-                cursor,
-                row_limit,
-                metadata_scope=selected_scope,
-            )
-        finally:
-            cursor.close()
-
-    def close(self) -> None:
-        """Close every cached Snowflake connection."""
-        with self._lock:
-            for name in tuple(self._connections):
-                connection = self._connections.pop(name, None)
-                if connection is not None and not connection.is_closed():
-                    connection.close()
-                    logger.info("Snowflake connection closed connection=%s", name)
-
-    def _build_connection_parameters(
-        self,
-        definition: SnowflakeConnectionDefinition,
-    ) -> dict[str, Any]:
-        """Translate one definition into Snowflake connector keyword arguments."""
-        pat_token = _resolve_pat_token(definition, self._resolve_secret)
-        parameters: dict[str, Any] = {
-            "account": definition.account,
-            "warehouse": definition.warehouse,
-            "user": definition.user,
-            "authenticator": "programmatic_access_token",
-            "token": pat_token,
-            **definition.connection_options.as_connector_parameters(),
-        }
-
-        if definition.database:
-            parameters["database"] = definition.database
-        if definition.schema_name:
-            parameters["schema"] = definition.schema_name
-        if definition.host:
-            parameters["host"] = definition.host
-        return parameters
-
-
-def _read_environment_value(variable_name: str) -> str:
-    """Return one trimmed environment value without logging sensitive content."""
-    return str(os.getenv(variable_name) or "").strip()
-
-
-def _resolve_pat_token(
-    definition: SnowflakeConnectionDefinition,
-    resolve_secret: SecretResolver | None = None,
-) -> str:
-    """Resolve a PAT from exactly one configured environment-variable source."""
-    authentication = definition.authentication
-    direct_pat = _read_environment_value(authentication.direct_pat_token_env)
-    secret_name = _read_environment_value(authentication.secret_env)
-
-    if direct_pat and secret_name:
-        raise RuntimeError(
-            f"Snowflake connection '{definition.name}' has both PAT sources configured. "
-            f"Set only one of {authentication.direct_pat_token_env} or "
-            f"{authentication.secret_env}."
-        )
-    if not direct_pat and not secret_name:
-        raise RuntimeError(
-            f"Snowflake connection '{definition.name}' requires a PAT. Set exactly one of "
-            f"{authentication.direct_pat_token_env} or {authentication.secret_env}."
-        )
-    if direct_pat:
-        return direct_pat
-
-    if resolve_secret is None:
-        raise RuntimeError("Snowflake secret authentication requires a secret resolver")
-    secret_value = resolve_secret(secret_name)
-    pat_token = str(secret_value or "").strip()
-    if not pat_token:
-        raise RuntimeError(
-            f"PAT secret '{secret_name}' for Snowflake connection "
-            f"'{definition.name}' resolved to an empty value."
-        )
-    return pat_token
-
-
-def _friendly_connection_error(
-    definition: SnowflakeConnectionDefinition,
-    error: Exception,
-) -> RuntimeError:
-    """Add connection context without exposing a PAT or other secret value."""
-    message = str(error)
-    if "token" in message.lower() or "expired" in message.lower() or "pat" in message.lower():
-        return RuntimeError(
-            f"Snowflake PAT for connection '{definition.name}' is invalid or expired."
-        )
-    return RuntimeError(f"Unable to open Snowflake connection '{definition.name}': {message}")
-
-
-def _resolve_metadata_scope(
-    scope: MetadataScope,
-    database: str,
-    schema: str,
-    table_name: str,
-) -> MetadataScope:
-    """Choose the most useful Snowflake discovery level for auto mode."""
-    if scope != "auto":
-        return scope
-    if table_name:
-        return "columns"
-    if database and schema:
-        return "tables"
-    if database:
-        return "schemas"
-    return "databases"
-
-
-def _build_metadata_query(
-    *,
-    scope: MetadataScope,
-    database: str,
-    schema: str,
-    table_name: str,
-    search_term: str,
-    row_limit: int,
-) -> str:
-    """Build a Snowflake metadata query from validated identifiers."""
-    if scope == "databases":
-        return "SHOW DATABASES"
-
-    if not database:
-        raise ValueError(f"metadata scope '{scope}' requires a database")
-
-    quoted_database = _quote_identifier(database)
-    if scope == "schemas":
-        query = (
-            "SELECT CATALOG_NAME AS DATABASE_NAME, SCHEMA_NAME, COMMENT "
-            f"FROM {quoted_database}.INFORMATION_SCHEMA.SCHEMATA"
-        )
-        filters = _metadata_search_filters(search_term, ("SCHEMA_NAME", "COMMENT"))
-        return _finish_metadata_query(query, filters, "SCHEMA_NAME", row_limit)
-
-    if scope == "tables":
-        query = (
-            "SELECT TABLE_CATALOG AS DATABASE_NAME, TABLE_SCHEMA, TABLE_NAME, "
-            f"TABLE_TYPE, COMMENT FROM {quoted_database}.INFORMATION_SCHEMA.TABLES"
-        )
-        filters = []
-        if schema:
-            filters.append(f"UPPER(TABLE_SCHEMA) = {_sql_literal(schema.upper())}")
-        filters.extend(_metadata_search_filters(search_term, ("TABLE_NAME", "COMMENT")))
-        return _finish_metadata_query(query, filters, "TABLE_SCHEMA, TABLE_NAME", row_limit)
-
-    if scope == "columns":
-        query = (
-            "SELECT TABLE_CATALOG AS DATABASE_NAME, TABLE_SCHEMA, TABLE_NAME, "
-            "COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COMMENT "
-            f"FROM {quoted_database}.INFORMATION_SCHEMA.COLUMNS"
-        )
-        filters = []
-        if schema:
-            filters.append(f"UPPER(TABLE_SCHEMA) = {_sql_literal(schema.upper())}")
-        if table_name:
-            filters.append(f"UPPER(TABLE_NAME) = {_sql_literal(table_name.upper())}")
-        filters.extend(
-            _metadata_search_filters(search_term, ("TABLE_NAME", "COLUMN_NAME", "COMMENT"))
-        )
-        return _finish_metadata_query(
-            query,
-            filters,
-            "TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION",
+            "Snowflake metadata input | tool=%s | scope=%s | database=%s | schema=%s | "
+            "table_name=%s | search_term=%s | row_limit=%s",
+            self.name,
+            scope,
+            database,
+            schema,
+            table_name,
+            search_term,
             row_limit,
         )
 
-    raise ValueError(f"unsupported metadata scope '{scope}'")
-
-
-def _metadata_search_filters(search_term: str, columns: tuple[str, ...]) -> list[str]:
-    """Create a safe case-insensitive Snowflake metadata search expression."""
-    if not search_term:
-        return []
-    pattern = _sql_literal(f"%{search_term.upper()}%")
-    comparisons = [f"UPPER(COALESCE({column}, '')) LIKE {pattern}" for column in columns]
-    return ["(" + " OR ".join(comparisons) + ")"]
-
-
-def _finish_metadata_query(
-    query: str,
-    filters: list[str],
-    order_by: str,
-    row_limit: int,
-) -> str:
-    """Add filters, ordering, and a bounded limit to Snowflake metadata SQL."""
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-    return f"{query} ORDER BY {order_by} LIMIT {row_limit}"
-
-
-def _add_row_limit(query: str, row_limit: int) -> str:
-    """Apply Snowflake LIMIT syntax when a SELECT/WITH query has no limit."""
-    normalized_query = query.strip().rstrip(";")
-    if normalized_query.upper().startswith(("SELECT", "WITH")) and not re.search(
-        r"\bLIMIT\s+\d+\b",
-        normalized_query,
-        flags=re.IGNORECASE,
-    ):
-        normalized_query += f" LIMIT {row_limit}"
-    return normalized_query
-
-
-def _serialize_cursor_rows(
-    cursor: Any,
-    row_limit: int,
-    metadata_scope: str | None = None,
-) -> dict[str, Any]:
-    """Convert Snowflake cursor rows into a connector-neutral result dictionary."""
-    columns = [column[0] for column in cursor.description or []]
-    rows = cursor.fetchmany(row_limit)
-    payload: dict[str, Any] = {
-        "status": "success",
-        "columns": columns,
-        "rows": [list(row) for row in rows],
-        "row_count": len(rows),
-        "row_limit": row_limit,
-    }
-    if metadata_scope:
-        payload["metadata_scope"] = metadata_scope
-    return payload
-
-
-def _quote_identifier(identifier: str) -> str:
-    """Quote a Snowflake identifier when it is not a simple safe name."""
-    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", identifier):
-        return identifier
-    return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
-
-
-def _sql_literal(value: str) -> str:
-    """Escape a string used as a Snowflake SQL literal."""
-    return "'" + value.replace("'", "''") + "'"
-
-
-def build_manager(
-    configuration: BaseModel,
-    resolve_secret: SecretResolver | None = None,
-) -> SnowflakeConnectionManager:
-    """Build one manager holding all active Snowflake connections."""
-    if not isinstance(configuration, SnowflakeConnectionsConfiguration):
-        raise TypeError("Snowflake requires SnowflakeConnectionsConfiguration")
-    return SnowflakeConnectionManager(configuration.connections, resolve_secret)
-
-
-DEFAULT_ROW_LIMIT = 1000
-MAX_ROW_LIMIT = 5000
-
-
-class DatabaseToolConfiguration(ToolConfiguration):
-    """One database tool mapped to a connector-owned connection."""
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    connection_name: str = Field(alias="connectionName", min_length=1)
-
-
-class DatabaseToolInput(BaseModel):
-    """Arguments accepted by every Snowflake database tool."""
-
-    query: str | None = Field(
-        default=None,
-        description="Optional database query. Leave empty to discover authorized metadata.",
-    )
-    row_limit: int = Field(
-        default=DEFAULT_ROW_LIMIT,
-        ge=1,
-        le=MAX_ROW_LIMIT,
-        description="Maximum number of data or metadata rows to return.",
-    )
-    metadata_scope: MetadataScope = Field(
-        default="auto",
-        description="Metadata scope used when query is empty.",
-    )
-    database: str | None = Field(default=None, description="Database to inspect.")
-    schema_name: str | None = Field(default=None, description="Schema to inspect.")
-    table_name: str | None = Field(default=None, description="Table to inspect for columns.")
-    search_term: str | None = Field(
-        default=None,
-        description="Case-insensitive text used to filter metadata names.",
-    )
-
-
-def validate_database_tool_definition(
-    raw_definition: Mapping[str, Any],
-) -> DatabaseToolConfiguration:
-    """Validate settings for a database operation."""
-    return DatabaseToolConfiguration.model_validate(dict(raw_definition))
-
-
-def create_database_tool(
-    definition: DatabaseToolConfiguration,
-    connection_manager: SnowflakeConnectionManager,
-) -> ToolDefinition:
-    """Bind query and metadata operations to a compatible database manager."""
-    if not isinstance(connection_manager, SnowflakeConnectionManager):
-        raise TypeError(f"Tool '{definition.name}' requires a database connection manager")
-
-    def run_database_tool(
-        query: str | None = None,
-        row_limit: int = DEFAULT_ROW_LIMIT,
-        metadata_scope: MetadataScope = "auto",
-        database: str | None = None,
-        schema_name: str | None = None,
-        table_name: str | None = None,
-        search_term: str | None = None,
-    ) -> dict[str, Any]:
-        """Execute a query or discover metadata through the selected connector."""
-        normalized_query = str(query or "").strip()
+        if scope == "auto":
+            if table_name:
+                scope = "columns"
+            elif database and schema:
+                scope = "tables"
+            elif database:
+                scope = "schemas"
+            else:
+                scope = "databases"
 
         try:
-            if normalized_query:
-                result = connection_manager.execute_query(
-                    definition.connection_name,
-                    normalized_query,
-                    row_limit,
+            conn = self._connection.get_connection()
+            cursor = conn.cursor()
+
+            if scope == "databases":
+                sql = "SHOW DATABASES"
+                logger.debug(
+                    "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                    self.name,
+                    scope,
+                    sql,
                 )
-            else:
-                result = connection_manager.discover_metadata(
-                    connection_name=definition.connection_name,
-                    scope=metadata_scope,
+                cursor.execute(sql)
+                return self._format_cursor_rows(
+                    cursor,
                     row_limit=row_limit,
-                    database=database,
-                    schema=schema_name,
-                    table_name=table_name,
+                    title="Authorized Snowflake databases",
                     search_term=search_term,
                 )
-        except Exception as exc:
-            operation = (
-                "query_execution_failed" if normalized_query else "metadata_discovery_failed"
-            )
-            logger.exception(
-                "Database operation failed tool=%s connection=%s",
-                definition.name,
-                definition.connection_name,
-            )
-            raise ToolOperationError(operation) from exc
 
+            if scope == "schemas":
+                if database:
+                    sql = (
+                        "SELECT CATALOG_NAME AS DATABASE_NAME, SCHEMA_NAME, COMMENT "
+                        f"FROM {self._quote_identifier(database)}.INFORMATION_SCHEMA.SCHEMATA "
+                    )
+                    if search_term:
+                        sql += (
+                            "WHERE UPPER(SCHEMA_NAME) LIKE "
+                            f"{self._sql_like_literal(search_term)} "
+                        )
+                    sql += "ORDER BY SCHEMA_NAME"
+                    if row_limit is not None:
+                        sql += f" LIMIT {row_limit}"
+                    logger.debug(
+                        "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                        self.name,
+                        scope,
+                        sql,
+                    )
+                    cursor.execute(sql)
+                    return self._format_cursor_rows(
+                        cursor,
+                        row_limit=row_limit,
+                        title=f"Snowflake schemas in {database}",
+                    )
+
+                sql = "SHOW SCHEMAS IN ACCOUNT"
+                logger.debug(
+                    "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                    self.name,
+                    scope,
+                    sql,
+                )
+                cursor.execute(sql)
+                return self._format_cursor_rows(
+                    cursor,
+                    row_limit=row_limit,
+                    title="Authorized Snowflake schemas",
+                    search_term=search_term,
+                )
+
+            if scope == "tables":
+                if database:
+                    sql = (
+                        "SELECT TABLE_CATALOG AS DATABASE_NAME, TABLE_SCHEMA, TABLE_NAME, "
+                        "TABLE_TYPE, COMMENT "
+                        f"FROM {self._quote_identifier(database)}.INFORMATION_SCHEMA.TABLES "
+                    )
+                    filters = []
+                    if schema:
+                        filters.append(
+                            f"UPPER(TABLE_SCHEMA) = {self._sql_literal(schema.upper())}"
+                        )
+                    if search_term:
+                        filters.append(
+                            "(UPPER(TABLE_NAME) LIKE "
+                            f"{self._sql_like_literal(search_term)} OR UPPER(COMMENT) LIKE "
+                            f"{self._sql_like_literal(search_term)})"
+                        )
+                    if filters:
+                        sql += "WHERE " + " AND ".join(filters) + " "
+                    sql += "ORDER BY TABLE_SCHEMA, TABLE_NAME"
+                    if row_limit is not None:
+                        sql += f" LIMIT {row_limit}"
+                    logger.debug(
+                        "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                        self.name,
+                        scope,
+                        sql,
+                    )
+                    cursor.execute(sql)
+                    return self._format_cursor_rows(
+                        cursor,
+                        row_limit=row_limit,
+                        title=f"Snowflake tables in {database}{'.' + schema if schema else ''}",
+                    )
+
+                sql = "SHOW TABLES IN ACCOUNT"
+                logger.debug(
+                    "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                    self.name,
+                    scope,
+                    sql,
+                )
+                cursor.execute(sql)
+                return self._format_cursor_rows(
+                    cursor,
+                    row_limit=row_limit,
+                    title="Authorized Snowflake tables",
+                    search_term=search_term,
+                )
+
+            if scope == "columns":
+                if not database:
+                    raise ValueError("Column discovery requires a database")
+
+                sql = (
+                    "SELECT TABLE_CATALOG AS DATABASE_NAME, TABLE_SCHEMA, TABLE_NAME, "
+                    "COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COMMENT "
+                    f"FROM {self._quote_identifier(database)}.INFORMATION_SCHEMA.COLUMNS "
+                )
+                filters = []
+                if schema:
+                    filters.append(f"UPPER(TABLE_SCHEMA) = {self._sql_literal(schema.upper())}")
+                if table_name:
+                    filters.append(f"UPPER(TABLE_NAME) = {self._sql_literal(table_name.upper())}")
+                if search_term:
+                    filters.append(
+                        "(UPPER(TABLE_NAME) LIKE "
+                        f"{self._sql_like_literal(search_term)} OR UPPER(COLUMN_NAME) LIKE "
+                        f"{self._sql_like_literal(search_term)} OR UPPER(COMMENT) LIKE "
+                        f"{self._sql_like_literal(search_term)})"
+                    )
+                if filters:
+                    sql += "WHERE " + " AND ".join(filters) + " "
+                sql += "ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+                if row_limit is not None:
+                    sql += f" LIMIT {row_limit}"
+                logger.debug(
+                    "Snowflake metadata query | tool=%s | scope=%s | sql=%s",
+                    self.name,
+                    scope,
+                    sql,
+                )
+                cursor.execute(sql)
+                return self._format_cursor_rows(
+                    cursor,
+                    row_limit=row_limit,
+                    title=f"Snowflake columns in {database}",
+                )
+
+            raise ValueError(
+                "metadata_scope must be one of auto, databases, schemas, tables, or columns"
+            )
+
+        except Exception as exc:
+            logger.exception(
+                "Snowflake metadata discovery failed | tool=%s | scope=%s",
+                self.name,
+                scope,
+            )
+            raise RuntimeError("metadata_discovery_failed") from exc
+
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+    def _format_cursor_rows(
+        self,
+        cursor,
+        *,
+        row_limit: int | None,
+        title: str,
+        search_term: str = "",
+    ) -> str:
+        rows = cursor.fetchmany(row_limit) if row_limit is not None else cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+
+        if search_term:
+            term = search_term.lower()
+            rows = [
+                row
+                for row in rows
+                if term in " ".join("" if value is None else str(value) for value in row).lower()
+            ]
+
+        if not rows:
+            result = f"{title}: 0 metadata row(s) found."
+            logger.debug(
+                "Snowflake metadata data returned | tool=%s | title=%s | data=%s",
+                self.name,
+                title,
+                result,
+            )
+            return result
+
+        df = pd.DataFrame(rows, columns=columns)
+        result = (
+            f"{title}: {len(rows)} metadata row(s) found:\n\n"
+            f"{df.to_string(index=False)}\n\n"
+            f"Columns: {', '.join(columns)}"
+        )
+        logger.debug(
+            "Snowflake metadata data returned | tool=%s | title=%s | data=%s",
+            self.name,
+            title,
+            result,
+        )
         return result
 
+    def _quote_identifier(self, identifier: str) -> str:
+        parts = [part.strip() for part in str(identifier or "").split(".") if part.strip()]
+        return ".".join(self._quote_identifier_part(part) for part in parts)
+
+    def _quote_identifier_part(self, identifier: str) -> str:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
+            return identifier
+        return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
+
+    def _sql_literal(self, value: str) -> str:
+        return "'" + str(value or "").replace("'", "''") + "'"
+
+    def _sql_like_literal(self, value: str) -> str:
+        return self._sql_literal(f"%{str(value or '').upper()}%")
+
+    def _normalize_row_limit(self, row_limit: int | None) -> int | None:
+        if row_limit is None:
+            return None
+        try:
+            return min(max(int(row_limit), 1), 5000)
+        except (TypeError, ValueError):
+            return None
+
+    def _should_apply_row_limit(self, query: str) -> bool:
+        normalized = query.lstrip().upper()
+        if not normalized.startswith(("SELECT", "WITH")):
+            return False
+        return re.search(r"\bLIMIT\s+\d+\b", normalized) is None
+
+    def _validate_read_only_query(self, query: str) -> None:
+        """Reject mutating or multi-statement SQL before it reaches Snowflake."""
+        normalized = self._sql_without_comments_or_literals(query).strip()
+        statement = normalized[:-1].rstrip() if normalized.endswith(";") else normalized
+
+        if not statement:
+            raise ValueError("A SQL query is required.")
+        if ";" in statement:
+            raise ValueError("Multiple SQL statements are not allowed.")
+        if not re.match(r"^(SELECT|WITH|SHOW|DESCRIBE|DESC)\b", statement, re.IGNORECASE):
+            raise ValueError("Only read-only SELECT, WITH, SHOW, or DESCRIBE queries are allowed.")
+
+        forbidden = (
+            r"\b(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|"
+            r"CALL|COPY|PUT|GET|REMOVE|UNDROP|REPLACE)\b"
+        )
+        if re.search(forbidden, statement, re.IGNORECASE):
+            raise ValueError("Mutating or administrative SQL is not allowed.")
+
+    @staticmethod
+    def _sql_without_comments_or_literals(query: str) -> str:
+        value = re.sub(r"/\*.*?\*/", " ", query, flags=re.DOTALL)
+        value = re.sub(r"--[^\n]*", " ", value)
+        value = re.sub(r"'(?:''|[^'])*'", "''", value)
+        return value
+
+
+def create_snowflake_tool(
+    configuration: ToolConfiguration, connection: SnowflakeConnection
+) -> ToolDefinition:
+    """Expose the existing tool class through the shared callable contract."""
+    tool = SnowflakeTool(configuration, connection)
     return ToolDefinition(
-        execute=run_database_tool,
-        name=definition.name,
-        description=_build_tool_description(definition, connection_manager),
-        input_schema=DatabaseToolInput,
+        name=tool.name,
+        description=tool.description,
+        input_schema=tool.args_schema,
+        execute=tool._run,
+        tags=tuple(configuration.tags),
+        metadata={"displayName": configuration.display_name},
     )
 
 
-def _build_tool_description(
-    definition: DatabaseToolConfiguration,
-    connection_manager: SnowflakeConnectionManager,
-) -> str:
-    """Build Snowflake instructions shown to the LLM."""
-    context = connection_manager.get_connection_context(definition.connection_name)
-    lines = [
-        definition.description.strip(),
-        "",
-        f"Purpose: {definition.purpose.strip()}",
-        "",
-        f"Connection: {definition.connection_name}",
-    ]
-
-    for label, value in context.items():
-        if value:
-            lines.append(f"{label}: {value}")
-
-    lines.extend(
-        [
-            "",
-            "Leave query empty to discover databases, schemas, tables, or columns.",
-            "Prefer fully qualified object names in database queries.",
-        ]
-    )
-
-    if definition.usage_guidelines:
-        lines.extend(["", "Usage guidelines:"])
-        lines.extend(f"- {guideline}" for guideline in definition.usage_guidelines)
-    if definition.non_usage_guidelines:
-        lines.extend(["", "Do not use this tool for:"])
-        lines.extend(f"- {guideline}" for guideline in definition.non_usage_guidelines)
-    return "\n".join(lines)
-
-
+# The manager loads this declaration when connector: snowflake is selected in YAML.
 integration = ToolIntegration(
     name="snowflake",
-    operations={
-        "database": ToolOperation(
-            name="database",
-            validate_tool=validate_database_tool_definition,
-            build_tool=create_database_tool,
-        ),
-    },
-    validate_connections=validate_snowflake_connections_configuration,
-    build_manager=build_manager,
+    operations=("database",),
+    connection_schema=SnowflakeConnectionConfiguration,
+    create_connection=SnowflakeConnection,
+    create_tool=create_snowflake_tool,
 )
-
-
-__all__ = ["integration"]

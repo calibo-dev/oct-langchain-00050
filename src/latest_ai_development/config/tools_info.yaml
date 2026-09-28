@@ -17,6 +17,10 @@ tools:
       - Discover tables, views, columns, and data types before querying when the structure is unknown.
       - Use HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA for metadata discovery.
       - Use SHOW and DESCRIBE commands when detailed object structure is required.
+      - Use SHOW PRIMARY KEYS IN SCHEMA HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA for primary-key columns.
+      - Use SHOW IMPORTED KEYS IN SCHEMA HOSPITAL_MANAGEMENT_DB.HOSPITAL_MANAGEMENT_SCHEMA for foreign-key column mappings.
+      - Pass each SHOW command separately in query; do not append WHERE or LIMIT to these key-discovery commands.
+      - Preserve key_sequence when interpreting composite keys; an empty successful result means no declared keys were returned.
       - Always reference tables and views using fully qualified Snowflake object names.
       - Execute read-only SELECT and WITH queries against hospital data.
       - Support joins, filtering, sorting, DISTINCT, grouping, aggregation, subqueries, CTEs, and window functions.
@@ -24,6 +28,7 @@ tools:
       - Return only information supported by the retrieved database records.
 
     nonUsageGuidelines:
+      - Do not query INFORMATION_SCHEMA.KEY_COLUMN_USAGE; Snowflake does not provide this view.
       - Do not access databases other than HOSPITAL_MANAGEMENT_DB.
       - Do not access schemas outside HOSPITAL_MANAGEMENT_SCHEMA, except HOSPITAL_MANAGEMENT_DB.INFORMATION_SCHEMA for metadata discovery.
       - Do not execute INSERT, UPDATE, DELETE, MERGE, TRUNCATE, CREATE, ALTER, DROP, GRANT, REVOKE, CALL, PUT, GET, COPY, or REMOVE.

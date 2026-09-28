@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from latest_ai_development.agents.config import (
     collect_agent_model_references,
@@ -29,13 +28,9 @@ from latest_ai_development.stages.schema import WorkflowDefinition
 from latest_ai_development.tools.tools_registry import (
     ToolsRegistry,
     build_tools_registry,
-    load_tools_configuration,
 )
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 from latest_ai_development.workflow.validator import validate_workflow_configuration
-
-if TYPE_CHECKING:
-    from latest_ai_development.tools.tools_manager import ToolSetup
 
 logger = logging.getLogger(__name__)
 
@@ -66,25 +61,22 @@ class ApplicationContainerBuilder:
 
         models_configuration = self._load_active_models(model_references)
         logger.debug("\n\nLoaded active models configuration:\n%s", models_configuration)
-        tools_configuration = self._load_active_tools(tool_names)
-        logger.debug("\n\nLoaded active tools configuration:\n%s", tools_configuration)
+        tool_registry = self._load_active_tools(tool_names)
+        logger.debug("\n\nBuilt active tool registry:\n%s", tool_registry)
 
-        self._validate_workflow(
-            workflow_definition,
-            agent_definitions,
-            models_configuration,
-            tools_configuration,
-        )
-
-        model_registry = self._build_models(
-            settings,
-            models_configuration,
-            model_references,
-        )
-        logger.debug("\n\nBuilt model registry:\n%s", model_registry)
-        tool_registry = self._build_tools(tools_configuration)
-        logger.debug("\n\nBuilt tool registry:\n%s", tool_registry)
         try:
+            self._validate_workflow(
+                workflow_definition,
+                agent_definitions,
+                models_configuration,
+                tool_registry,
+            )
+            model_registry = self._build_models(
+                settings,
+                models_configuration,
+                model_references,
+            )
+            logger.debug("\n\nBuilt model registry:\n%s", model_registry)
             agent_registry = self._build_agents(
                 agent_definitions,
                 model_registry,
@@ -175,23 +167,25 @@ class ApplicationContainerBuilder:
     def _load_active_tools(
         self,
         tool_names: tuple[str, ...],
-    ) -> ToolSetup | None:
-        """Load validated configuration for active tools."""
-        return load_tools_configuration(CONFIG_DIR, tool_names)
+    ) -> ToolsRegistry:
+        """Build selected native tools and retain their shared resource owner."""
+        registry = build_tools_registry(tool_names, CONFIG_DIR)
+        logger.info("Tool objects created count=%s", len(registry))
+        return registry
 
     def _validate_workflow(
         self,
         workflow_definition: WorkflowDefinition,
         agent_definitions: tuple[AgentDefinition, ...],
         models_configuration: ModelsConfiguration,
-        tools_configuration: ToolSetup | None,
+        tool_registry: ToolsRegistry,
     ) -> None:
         """Validate references before constructing external runtime objects."""
         validate_workflow_configuration(
             workflow_definition,
             agent_definitions,
             models_configuration,
-            {tool.name for tool in tools_configuration.tools} if tools_configuration else set(),
+            set(tool_registry),
         )
 
     def _build_models(
@@ -203,18 +197,6 @@ class ApplicationContainerBuilder:
         """Create runtime LLM objects used by active agents."""
         registry = build_model_registry(settings, configuration, model_references)
         logger.info("Model objects created count=%s", registry.count())
-        return registry
-
-    def _build_tools(self, configuration: ToolSetup | None) -> ToolsRegistry:
-        """Create framework-native tools and retain their resource owner."""
-
-        def resolve_secret(secret_name: str) -> str | None:
-            from latest_ai_development.core.secrets_manager import SecretsManager
-
-            return SecretsManager().get_secret(secret_name)
-
-        registry = build_tools_registry(configuration, resolve_secret)
-        logger.info("Tool objects created count=%s", len(registry))
         return registry
 
     def _build_agents(

@@ -1,4 +1,4 @@
-"""Adapt portable tool definitions to this template's LangChain runtime."""
+"""Convert portable tool definitions into LangChain tools and own their lifecycle."""
 
 from __future__ import annotations
 
@@ -8,17 +8,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from langchain.tools import ToolRuntime
-from langchain_core.tools import InjectedToolArg, StructuredTool
+from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool
 from pydantic import BaseModel, create_model
 
 from latest_ai_development.core.errors import ToolExecutionError
+from latest_ai_development.core.settings import CONFIG_DIR
 
 if TYPE_CHECKING:
-    from .tools_manager import ToolDefinition, ToolSetup, ToolsManager
+    from .tools_manager import ToolDefinition, ToolsManager
 
 
 def _format_result(result: Any) -> str:
-    """Keep text intact and serialize portable structured results for model messages."""
+    """Preserve text and serialize structured results for the model."""
     if isinstance(result, str):
         return result
     if isinstance(result, BaseModel):
@@ -26,14 +27,12 @@ def _format_result(result: Any) -> str:
     return json.dumps(result, default=str)
 
 
-def adapt_tool(definition: ToolDefinition) -> StructuredTool:
-    """Build a native tool without changing the portable operation's execution policy."""
+def create_langchain_tool(definition: ToolDefinition) -> StructuredTool:
+    """Wrap a portable callable with LangChain schemas, context, and error handling."""
     input_schema = definition.input_schema
     if definition.uses_context:
-        if "runtime" in input_schema.model_fields:
-            raise ValueError(f"Tool '{definition.name}' uses LangChain's reserved runtime argument")
-        # Explicit schemas must declare injected arguments too, or LangChain's
-        # input validation discards them before calling the operation wrapper.
+        if {"runtime", "context"} & input_schema.model_fields.keys():
+            raise ValueError(f"Tool '{definition.name}' cannot expose injected context as input")
         input_schema = create_model(
             f"{definition.name}_runtime_input",
             __base__=input_schema,
@@ -74,21 +73,28 @@ def adapt_tool(definition: ToolDefinition) -> StructuredTool:
         name=definition.name,
         description=definition.description,
         args_schema=input_schema,
+        tags=list(definition.tags),
+        metadata=dict(definition.metadata),
     )
 
 
-class ToolsRegistry(Mapping[str, StructuredTool]):
-    """Framework-native tool lookup and lifecycle owned by the template."""
+def _resolve_secret(name: str) -> str | None:
+    """Supply the template's secret backend without coupling integrations to it."""
+    from latest_ai_development.core.secrets_manager import SecretsManager
+
+    return SecretsManager().get_secret(name)
+
+
+class ToolsRegistry(Mapping[str, BaseTool]):
+    """Native tool lookup with a shared manager responsible for resource cleanup."""
 
     def __init__(
-        self,
-        tools: Mapping[str, StructuredTool],
-        manager: ToolsManager | None = None,
+        self, tools: Mapping[str, BaseTool], manager: ToolsManager | None = None
     ) -> None:
         self._tools = dict(tools)
         self._manager = manager
 
-    def __getitem__(self, name: str) -> StructuredTool:
+    def __getitem__(self, name: str) -> BaseTool:
         return self._tools[name]
 
     def __iter__(self) -> Iterator[str]:
@@ -97,38 +103,33 @@ class ToolsRegistry(Mapping[str, StructuredTool]):
     def __len__(self) -> int:
         return len(self._tools)
 
+    def get_tools(self) -> list[BaseTool]:
+        """Return the tools when a LangChain caller needs a list."""
+        return list(self._tools.values())
+
     def close(self) -> None:
-        """Release shared integration resources when the application stops."""
+        """Delegate resource cleanup to the framework-independent manager."""
         if self._manager is not None:
             self._manager.close()
 
 
-def load_tools_configuration(
-    config_dir: Path, tool_names: Iterable[str]
-) -> ToolSetup | None:
-    """Skip optional skill assets entirely when the workflow has no tools."""
-    selected = tuple(tool_names)
-    if not selected:
-        return None
-    try:
-        from .tools_manager import load_configuration
-    except ModuleNotFoundError as exc:
-        raise ValueError("Active agents require tools_manager.py and its dependencies") from exc
-    return load_configuration(config_dir, selected)
-
-
 def build_tools_registry(
-    configuration: ToolSetup | None,
+    tool_names: Iterable[str] | None = None,
+    config_dir: Path = CONFIG_DIR,
     resolve_secret: Callable[[str], str | None] | None = None,
 ) -> ToolsRegistry:
-    """Convert portable definitions to LangChain tools without owning integration logic."""
-    if configuration is None or not configuration.tools:
+    """Create the workflow's selected tools without importing unused integration assets."""
+    selected = None if tool_names is None else tuple(tool_names)
+    if selected == ():
         return ToolsRegistry({})
-    from .tools_manager import build_tools_manager
-
-    manager = build_tools_manager(configuration, resolve_secret)
     try:
-        tools = {tool.name: adapt_tool(tool) for tool in manager.all()}
+        from .tools_manager import ToolsManager
+    except ModuleNotFoundError as exc:
+        raise ValueError("Active tools require tools_manager.py and its dependencies") from exc
+    manager = ToolsManager(config_dir, resolve_secret or _resolve_secret)
+    try:
+        definitions = manager.create_tools(selected)
+        tools = {definition.name: create_langchain_tool(definition) for definition in definitions}
     except Exception:
         manager.close()
         raise
