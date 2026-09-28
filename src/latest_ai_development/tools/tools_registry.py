@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from langchain.tools import ToolRuntime
@@ -12,7 +14,7 @@ from pydantic import BaseModel, create_model
 from latest_ai_development.core.errors import ToolExecutionError
 
 if TYPE_CHECKING:
-    from .manager import ToolDefinition, ToolRegistry
+    from .tools_manager import ToolDefinition, ToolSetup, ToolsManager
 
 
 def _format_result(result: Any) -> str:
@@ -75,6 +77,59 @@ def adapt_tool(definition: ToolDefinition) -> StructuredTool:
     )
 
 
-def adapt_tools(registry: ToolRegistry) -> dict[str, StructuredTool]:
-    """Create the native tool lookup consumed by the agent factory."""
-    return {tool.name: adapt_tool(tool) for tool in registry.all()}
+class ToolsRegistry(Mapping[str, StructuredTool]):
+    """Framework-native tool lookup and lifecycle owned by the template."""
+
+    def __init__(
+        self,
+        tools: Mapping[str, StructuredTool],
+        manager: ToolsManager | None = None,
+    ) -> None:
+        self._tools = dict(tools)
+        self._manager = manager
+
+    def __getitem__(self, name: str) -> StructuredTool:
+        return self._tools[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._tools)
+
+    def __len__(self) -> int:
+        return len(self._tools)
+
+    def close(self) -> None:
+        """Release shared integration resources when the application stops."""
+        if self._manager is not None:
+            self._manager.close()
+
+
+def load_tools_configuration(
+    config_dir: Path, tool_names: Iterable[str]
+) -> ToolSetup | None:
+    """Skip optional skill assets entirely when the workflow has no tools."""
+    selected = tuple(tool_names)
+    if not selected:
+        return None
+    try:
+        from .tools_manager import load_configuration
+    except ModuleNotFoundError as exc:
+        raise ValueError("Active agents require tools_manager.py and its dependencies") from exc
+    return load_configuration(config_dir, selected)
+
+
+def build_tools_registry(
+    configuration: ToolSetup | None,
+    resolve_secret: Callable[[str], str | None] | None = None,
+) -> ToolsRegistry:
+    """Convert portable definitions to LangChain tools without owning integration logic."""
+    if configuration is None or not configuration.tools:
+        return ToolsRegistry({})
+    from .tools_manager import build_tools_manager
+
+    manager = build_tools_manager(configuration, resolve_secret)
+    try:
+        tools = {tool.name: adapt_tool(tool) for tool in manager.all()}
+    except Exception:
+        manager.close()
+        raise
+    return ToolsRegistry(tools, manager)
