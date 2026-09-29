@@ -12,7 +12,7 @@ connections:
     # Populate exactly one option at runtime.
     authentication:
       directPatToken: SNOWFLAKE_HOSPITAL_MANAGEMENT_PAT_TOKEN
-      secret: SNOWFLAKE_HOSPITAL_MANAGEMENT_PAT_SECRET_NAME
+      secret: SNOWFLAKE_MANAGEMENT_CONNECTION_PAT_SECRET
 
     connectionOptions:
       clientSessionKeepAlive: true
