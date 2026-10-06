@@ -1,21 +1,66 @@
-"""Convert portable tool definitions into LangChain tools and own their lifecycle."""
+"""Assemble LangChain tools from tools.yml factories and named connection.yml settings."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Iterator, Mapping
+import re
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from latest_ai_development.core.errors import ToolExecutionError
 from latest_ai_development.core.settings import CONFIG_DIR
 
-if TYPE_CHECKING:
-    from .tools_manager import ToolDefinition, ToolsManager
+from .connection import ConnectionManager, load_entries, resolve_tool_config
+
+
+class ToolConfiguration(BaseModel):
+    """One tools.yml entry, with its mapping key supplied as the name."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    factory: str = Field(min_length=1)
+    connection_name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    display_name: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    usage_guidelines: list[str] = Field(default_factory=list)
+    non_usage_guidelines: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ToolDefinition:
+    """A provider callable and input schema before LangChain adaptation."""
+
+    name: str
+    description: str
+    input_schema: type[BaseModel]
+    execute: Callable[..., Any]
+    tags: tuple[str, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    async_execute: Callable[..., Awaitable[Any]] | None = None
+    uses_context: bool = False
+
+
+def build_tool_description(configuration: ToolConfiguration, context: Iterable[str] = ()) -> str:
+    """Combine tool guidance from YAML with provider connection context."""
+    lines = [configuration.description, "", f"Purpose: {configuration.purpose}", ""]
+    lines.extend(context)
+    if configuration.usage_guidelines:
+        lines.extend(["", "Usage guidelines:"])
+        lines.extend(f"- {value}" for value in configuration.usage_guidelines)
+    if configuration.non_usage_guidelines:
+        lines.extend(["", "Non-usage guidelines:"])
+        lines.extend(f"- {value}" for value in configuration.non_usage_guidelines)
+    return "\n".join(lines)
 
 
 def _format_result(result: Any) -> str:
@@ -86,10 +131,10 @@ def _resolve_secret(name: str) -> str | None:
 
 
 class ToolsRegistry(Mapping[str, BaseTool]):
-    """Native tool lookup with a shared manager responsible for resource cleanup."""
+    """Native tool lookup with a shared connection owner for resource cleanup."""
 
     def __init__(
-        self, tools: Mapping[str, BaseTool], manager: ToolsManager | None = None
+        self, tools: Mapping[str, BaseTool], manager: ConnectionManager | None = None
     ) -> None:
         self._tools = dict(tools)
         self._manager = manager
@@ -108,7 +153,7 @@ class ToolsRegistry(Mapping[str, BaseTool]):
         return list(self._tools.values())
 
     def close(self) -> None:
-        """Delegate resource cleanup to the framework-independent manager."""
+        """Close shared provider connections at application shutdown."""
         if self._manager is not None:
             self._manager.close()
 
@@ -118,19 +163,49 @@ def build_tools_registry(
     config_dir: Path = CONFIG_DIR,
     resolve_secret: Callable[[str], str | None] | None = None,
 ) -> ToolsRegistry:
-    """Create the workflow's selected tools without importing unused integration assets."""
-    selected = None if tool_names is None else tuple(tool_names)
+    """Resolve both YAML files, call shared factories, and adapt the selected tools."""
+    selected = None if tool_names is None else tuple(dict.fromkeys(tool_names))
     if selected == ():
         return ToolsRegistry({})
+    entries = load_entries(config_dir / "tools.yml", "tools")
+    selected = tuple(entries) if selected is None else selected
+    missing = set(selected) - entries.keys()
+    if missing:
+        raise ValueError(f"Missing workflow tools: {sorted(missing)}")
+    if not selected:
+        return ToolsRegistry({})
+    manager = ConnectionManager(config_dir, resolve_secret or _resolve_secret)
     try:
-        from .tools_manager import ToolsManager
-    except ModuleNotFoundError as exc:
-        raise ValueError("Active tools require tools_manager.py and its dependencies") from exc
-    manager = ToolsManager(config_dir, resolve_secret or _resolve_secret)
-    try:
-        definitions = manager.create_tools(selected)
-        tools = {definition.name: create_langchain_tool(definition) for definition in definitions}
+        tools = {}
+        for name in selected:
+            if "name" in entries[name]:
+                raise ValueError(f"Tool '{name}' must use its YAML mapping key as its name")
+            resolved = resolve_tool_config(name, entries[name], manager.configurations)
+            metadata = {
+                key: value
+                for key, value in resolved.items()
+                if key not in {"connector", "configuration"}
+            }
+            configuration = ToolConfiguration.model_validate({**metadata, "name": name})
+            factory = _load_factory(configuration.factory)
+            definition = factory(tool_name=name, tool_config=resolved, connection_manager=manager)
+            if not isinstance(definition, ToolDefinition) or definition.name != name:
+                raise ValueError(f"Factory for '{name}' must return a matching ToolDefinition")
+            tools[name] = create_langchain_tool(definition)
     except Exception:
         manager.close()
         raise
     return ToolsRegistry(tools, manager)
+
+
+def _load_factory(reference: str) -> Callable[..., ToolDefinition]:
+    """Load an explicitly configured factory from this template's tools package."""
+    if not re.fullmatch(
+        r"latest_ai_development\.tools\.[a-z][a-z0-9_]*:[a-z][a-z0-9_]*", reference
+    ):
+        raise ValueError("Tool factory must use 'latest_ai_development.tools.<module>:<function>'")
+    module_name, function_name = reference.split(":")
+    factory = getattr(import_module(module_name), function_name, None)
+    if not callable(factory):
+        raise ValueError(f"Configured tool factory '{reference}' is not callable")
+    return factory

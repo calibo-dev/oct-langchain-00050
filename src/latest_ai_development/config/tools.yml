@@ -1,0 +1,47 @@
+# One entry per tool. All three use the same Snowflake Python factory.
+# Named connection settings belong in connection.yml.
+tools:
+  snowflake_table_hospitals:
+    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    connection_name: hospital_core_connection
+    display_name: Hospital Data
+    description: Query hospital profile and capacity data from Snowflake.
+    purpose: Retrieve hospital names, locations, ownership, bed capacity, and facilities.
+    tags: [snowflake, hospitals, read-only]
+    usage_guidelines:
+      - Use for hospital profile, location, ownership, capacity, and facility questions.
+      - Discover tables and columns before writing SQL when the structure is unknown.
+      - Use fully qualified DATABASE.SCHEMA.TABLE names.
+    non_usage_guidelines:
+      - Do not use for patient or doctor records.
+      - Do not execute mutating or administrative SQL.
+
+  snowflake_table_patients:
+    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    connection_name: hospital_core_connection
+    display_name: Patient Data
+    description: Query patient admission and room-utilization data from Snowflake.
+    purpose: Retrieve admissions, discharges, hospital assignments, and room utilization.
+    tags: [snowflake, patients, read-only]
+    usage_guidelines:
+      - Use for patient flow, admissions, discharges, and room-utilization questions.
+      - Discover tables and columns before writing SQL when the structure is unknown.
+      - Return only fields needed to answer the request; prefer aggregate results.
+    non_usage_guidelines:
+      - Do not use for hospital profile or doctor-only questions.
+      - Do not execute mutating or administrative SQL.
+
+  snowflake_table_doctors:
+    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    connection_name: hospital_staff_connection
+    display_name: Doctor Data
+    description: Query doctor, specialty, and hospital-affiliation data from Snowflake.
+    purpose: Retrieve medical specialties, staffing assignments, and hospital affiliations.
+    tags: [snowflake, doctors, read-only]
+    usage_guidelines:
+      - Use for doctor, specialty, staffing, and hospital-affiliation questions.
+      - Discover tables and columns before writing SQL when the structure is unknown.
+      - Use fully qualified DATABASE.SCHEMA.TABLE names.
+    non_usage_guidelines:
+      - Do not use for patient admission or room-utilization questions.
+      - Do not execute mutating or administrative SQL.

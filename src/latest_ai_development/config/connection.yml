@@ -1,0 +1,34 @@
+# Replace these non-secret example values with your Snowflake connection details.
+# PAT values never go here: authentication fields name variables in .env/process env.
+connections:
+  hospital_core_connection:
+    connector: {category: RDBMS, type: SNOWFLAKE}
+    configuration:
+      account: your_core_account
+      user: your_core_user
+      warehouse: your_core_warehouse
+      database: null  # Optional: set your database to guide metadata discovery.
+      schema: null    # Optional: set your schema to guide metadata discovery.
+      authentication:
+        directPatToken: SNOWFLAKE_HOSPITAL_CORE_PAT_TOKEN
+        secret: SNOWFLAKE_HOSPITAL_CORE_PAT_SECRET_NAME
+      connectionOptions:
+        clientSessionKeepAlive: false
+        loginTimeout: 30
+        networkTimeout: 60
+
+  hospital_staff_connection:
+    connector: {category: RDBMS, type: SNOWFLAKE}
+    configuration:
+      account: your_staff_account
+      user: your_staff_user
+      warehouse: your_staff_warehouse
+      database: null
+      schema: null
+      authentication:
+        directPatToken: SNOWFLAKE_HOSPITAL_STAFF_PAT_TOKEN
+        secret: SNOWFLAKE_HOSPITAL_STAFF_PAT_SECRET_NAME
+      connectionOptions:
+        clientSessionKeepAlive: false
+        loginTimeout: 30
+        networkTimeout: 60

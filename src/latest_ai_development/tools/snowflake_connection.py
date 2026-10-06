@@ -5,17 +5,17 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from threading import Lock
 from typing import Any, Literal, Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .tools_manager import (
+from .connection import ConnectionManager
+from .tools_registry import (
     ToolConfiguration,
     ToolDefinition,
-    ToolIntegration,
     build_tool_description,
 )
 
@@ -80,16 +80,18 @@ class SnowflakeConnection:
         self,
         configuration: SnowflakeConnectionConfiguration,
         resolve_secret: Callable[[str], str | None] | None = None,
+        read_environment: Callable[[str], str] | None = None,
     ) -> None:
         self.configuration = configuration
         self._resolve_secret = resolve_secret
+        self._read_environment = read_environment or (lambda name: os.getenv(name, "").strip())
         self._connection: Any = None
         self._lock = Lock()
 
     def _resolve_pat(self) -> str:
         authentication = self.configuration.authentication
-        direct_pat = os.getenv(authentication.direct_pat_token, "").strip()
-        secret_name = os.getenv(authentication.secret, "").strip()
+        direct_pat = self._read_environment(authentication.direct_pat_token)
+        secret_name = self._read_environment(authentication.secret)
         if bool(direct_pat) == bool(secret_name):
             raise RuntimeError(
                 f"Connection '{self.configuration.name}' requires exactly one PAT source: "
@@ -171,7 +173,7 @@ class SnowflakeToolInput(BaseModel):
         default=None,
         description="Optional Snowflake database name to inspect for schemas, tables, or columns.",
     )
-    schema: str | None = Field(
+    schema_name: str | None = Field(
         default=None,
         description="Optional Snowflake schema name to inspect for tables or columns.",
     )
@@ -190,9 +192,7 @@ class SnowflakeTool:
 
     args_schema: type[BaseModel] = SnowflakeToolInput
 
-    def __init__(
-        self, configuration: ToolConfiguration, connection: SnowflakeConnection
-    ) -> None:
+    def __init__(self, configuration: ToolConfiguration, connection: SnowflakeConnection) -> None:
         if configuration.connection_name != connection.configuration.name:
             raise ValueError(f"Tool '{configuration.name}' has a mismatched connection")
         self.name = configuration.name
@@ -230,7 +230,7 @@ class SnowflakeTool:
         row_limit: int | None = 1000,
         metadata_scope: str | None = "auto",
         database: str | None = None,
-        schema: str | None = None,
+        schema_name: str | None = None,
         table_name: str | None = None,
         search_term: str | None = None,
     ) -> str:
@@ -242,7 +242,7 @@ class SnowflakeTool:
             row_limit,
             metadata_scope,
             database or "",
-            schema or "",
+            schema_name or "",
             table_name or "",
             search_term or "",
         )
@@ -255,7 +255,7 @@ class SnowflakeTool:
                 row_limit=normalized_row_limit,
                 metadata_scope=metadata_scope,
                 database=database,
-                schema=schema,
+                schema=schema_name,
                 table_name=table_name,
                 search_term=search_term,
             )
@@ -282,9 +282,7 @@ class SnowflakeTool:
             if cursor.description is None:
                 affected = cursor.rowcount
                 affected_text = (
-                    str(affected)
-                    if affected is not None and affected >= 0
-                    else "unknown"
+                    str(affected) if affected is not None and affected >= 0 else "unknown"
                 )
                 result = f"Query executed successfully. Rows affected: {affected_text}."
                 logger.debug(
@@ -398,8 +396,7 @@ class SnowflakeTool:
                     )
                     if search_term:
                         sql += (
-                            "WHERE UPPER(SCHEMA_NAME) LIKE "
-                            f"{self._sql_like_literal(search_term)} "
+                            f"WHERE UPPER(SCHEMA_NAME) LIKE {self._sql_like_literal(search_term)} "
                         )
                     sql += "ORDER BY SCHEMA_NAME"
                     if row_limit is not None:
@@ -441,9 +438,7 @@ class SnowflakeTool:
                     )
                     filters = []
                     if schema:
-                        filters.append(
-                            f"UPPER(TABLE_SCHEMA) = {self._sql_literal(schema.upper())}"
-                        )
+                        filters.append(f"UPPER(TABLE_SCHEMA) = {self._sql_literal(schema.upper())}")
                     if search_term:
                         filters.append(
                             "(UPPER(TABLE_NAME) LIKE "
@@ -601,7 +596,7 @@ class SnowflakeTool:
             return None
         try:
             return min(max(int(row_limit), 1), 5000)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _should_apply_row_limit(self, query: str) -> bool:
@@ -648,15 +643,44 @@ def create_snowflake_tool(
         input_schema=tool.args_schema,
         execute=tool._run,
         tags=tuple(configuration.tags),
-        metadata={"displayName": configuration.display_name},
+        metadata={
+            "display_name": configuration.display_name,
+            "connection_name": configuration.connection_name,
+            "connector": connection.configuration.connector,
+        },
     )
 
 
-# The manager loads this declaration when connector: snowflake is selected in YAML.
-integration = ToolIntegration(
-    name="snowflake",
-    operations=("database",),
-    connection_schema=SnowflakeConnectionConfiguration,
-    create_connection=SnowflakeConnection,
-    create_tool=create_snowflake_tool,
-)
+def create_tool(
+    *, tool_name: str, tool_config: Mapping[str, Any], connection_manager: ConnectionManager
+) -> ToolDefinition:
+    """Build any named Snowflake tool with its resolved YAML settings."""
+    connector = tool_config["connector"]
+    if connector != {"category": "RDBMS", "type": "SNOWFLAKE"}:
+        raise ValueError(f"Tool '{tool_name}' requires an RDBMS/SNOWFLAKE connection")
+    configuration = ToolConfiguration.model_validate(
+        {
+            **{
+                key: value
+                for key, value in tool_config.items()
+                if key not in {"connector", "configuration"}
+            },
+            "name": tool_name,
+        }
+    )
+    connection_settings = SnowflakeConnectionConfiguration.model_validate(
+        {
+            **tool_config["configuration"],
+            "name": configuration.connection_name,
+            "connector": "snowflake",
+        }
+    )
+    connection = connection_manager.get_or_create(
+        configuration.connection_name,
+        lambda: SnowflakeConnection(
+            connection_settings,
+            connection_manager.resolve_secret,
+            connection_manager.read_environment,
+        ),
+    )
+    return create_snowflake_tool(configuration, connection)

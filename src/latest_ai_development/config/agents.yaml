@@ -9,12 +9,19 @@ agents:
       - topic
     outputs:
       - draft
-    tools: []
+    tools:
+      - snowflake_table_hospitals
+      - snowflake_table_patients
+      - snowflake_table_doctors
     system_prompt: |
-      Create a clear, concise draft about the supplied topic using only the
-      information provided in the request and general writing knowledge.
+      Create a clear, concise draft about the supplied topic. For hospital,
+      patient, or doctor data, call the relevant configured Snowflake tool.
+      Select tools by their purpose and guidelines, discover tables and columns
+      when needed, then run read-only queries using fully qualified table names.
 
-      Do not claim to have searched external sources or retrieved current data.
+      Base data-specific claims only on successful tool results. Never invent
+      tables, query results, or missing data. Tool guidelines describe intended
+      use; database permissions determine what data can actually be accessed.
       Return only a valid JSON object containing exactly the key "draft".
       Do not include markdown fences or text outside the JSON object.
 
