@@ -30,7 +30,7 @@ src/latest_ai_development/
 ├── stages/                 # Workflow schemas and dependency validation
 ├── tools/
 │   ├── connection.py       # YAML loading, connection resolution, .env, lifecycle
-│   ├── tools_registry.py   # Tool contracts, descriptions, assembly, LangChain adaptation
+│   ├── tools_registry.py   # Resolve YAML, call factories, cache native LangChain tools
 │   └── snowflake_connection.py  # One shared Snowflake factory and implementation
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
@@ -43,7 +43,7 @@ src/latest_ai_development/
 
 Tool metadata and connection properties have separate sources of truth. The
 registry joins them by `connection_name`, calls the configured provider factory,
-and adapts its callable and schema into a LangChain `StructuredTool`. Agents
+and stores the native LangChain tool it returns. Agents
 reference the exact keys in `tools.yml`; all active agents reuse the same registry.
 
 ## Adding a connector
@@ -51,20 +51,24 @@ reference the exact keys in `tools.yml`; all active agents reuse the same regist
 Add one provider module in `tools/`, exporting a factory with this contract:
 
 ```python
-def create_tool(*, tool_name, tool_config, connection_manager) -> ToolDefinition:
+def create_tool(*, tool_name, tool_config, connection_manager) -> BaseTool:
     ...
 ```
 
 `tool_config` contains the tool metadata plus its resolved `connector` and
 `configuration` from `connection.yml`. The factory validates provider settings
 and uses `connection_manager.get_or_create(connection_name, factory)` to share
-connections by name. It returns a `ToolDefinition` from `tools/tools_registry.py`; the
-registry supplies the LangChain adaptation and shutdown lifecycle. Async
-callables and injected runtime context remain supported by that adapter.
+connections by name. The factory returns a native LangChain `BaseTool` (for example,
+`StructuredTool`) directly. There is no intermediate tool-definition model or
+registry adapter. The registry retains the existing application shutdown lifecycle.
+Providers build their own input schemas, descriptions, and error handling.
 
 Add records to `connection.yml` and `tools.yml`, then assign tool names in
-`agents.yaml`. Factories must use
-`latest_ai_development.tools.<module>:<function>` references. Multiple tools may
+`agents.yaml`. Factories use `<module>:<attribute>` references, as in LangGraph.
+The registry passes `tool_name`, resolved `tool_config`, and `connection_manager`
+only when declared in the factory signature. Optional `factory_kwargs` supply
+non-secret constructor parameters and cannot override these wiring arguments.
+Tools without `connection_name` can use standalone factories. Multiple tools may
 use the same factory and connection, or the same factory with different
 connections. Restart after YAML changes. Add provider dependencies when needed.
 

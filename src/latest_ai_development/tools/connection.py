@@ -52,6 +52,8 @@ def resolve_tool_config(
 ) -> dict[str, Any]:
     """Join tools.yml with connection.yml without opening external connections."""
     resolved = dict(tool_config)
+    if "connection_name" not in resolved:
+        return resolved
     if "connector" in resolved or "configuration" in resolved:
         raise ValueError(f"Tool '{tool_name}' must put connector/configuration in connection.yml")
     name = resolved.get("connection_name")

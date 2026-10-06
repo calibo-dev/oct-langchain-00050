@@ -10,14 +10,12 @@ from threading import Lock
 from typing import Any, Literal, Self
 
 import pandas as pd
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from latest_ai_development.core.errors import ToolExecutionError
+
 from .connection import ConnectionManager
-from .tools_registry import (
-    ToolConfiguration,
-    ToolDefinition,
-    build_tool_description,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -192,19 +190,21 @@ class SnowflakeTool:
 
     args_schema: type[BaseModel] = SnowflakeToolInput
 
-    def __init__(self, configuration: ToolConfiguration, connection: SnowflakeConnection) -> None:
-        if configuration.connection_name != connection.configuration.name:
-            raise ValueError(f"Tool '{configuration.name}' has a mismatched connection")
-        self.name = configuration.name
-        self.description = self._build_description(configuration, connection)
+    def __init__(
+        self, tool_name: str, tool_config: Mapping[str, Any], connection: SnowflakeConnection
+    ) -> None:
+        self.name = tool_name
+        self.description = self._build_description(tool_config, connection)
         self._connection = connection
 
     @staticmethod
-    def _build_description(
-        configuration: ToolConfiguration, connection: SnowflakeConnection
-    ) -> str:
+    def _build_description(tool_config: Mapping[str, Any], connection: SnowflakeConnection) -> str:
         details = connection.configuration
-        context = [
+        lines = [
+            tool_config.get("description") or "Query Snowflake data and discover metadata.",
+            "",
+            f"Purpose: {tool_config.get('purpose') or 'Read-only data retrieval.'}",
+            "",
             "Leave query empty to discover metadata before writing SQL.",
             "Prefer fully qualified DATABASE.SCHEMA.TABLE names in SQL queries.",
             "",
@@ -217,8 +217,19 @@ class SnowflakeTool:
             ("Warehouse", details.warehouse),
         ):
             if value:
-                context.append(f"{label}: {value}")
-        return build_tool_description(configuration, context)
+                lines.append(f"{label}: {value}")
+        for key, label in (
+            ("usage_guidelines", "Usage guidelines:"),
+            ("non_usage_guidelines", "Non-usage guidelines:"),
+        ):
+            guidelines = tool_config.get(key, [])
+            if not isinstance(guidelines, list) or any(
+                not isinstance(value, str) for value in guidelines
+            ):
+                raise ValueError(f"{key} must be a list of strings")
+            if guidelines:
+                lines.extend(["", label, *(f"- {value}" for value in guidelines)])
+        return "\n".join(lines)
 
     def close(self) -> None:
         """Release the shared connection when the application stops."""
@@ -632,55 +643,46 @@ class SnowflakeTool:
         return value
 
 
-def create_snowflake_tool(
-    configuration: ToolConfiguration, connection: SnowflakeConnection
-) -> ToolDefinition:
-    """Expose the existing tool class through the shared callable contract."""
-    tool = SnowflakeTool(configuration, connection)
-    return ToolDefinition(
-        name=tool.name,
-        description=tool.description,
-        input_schema=tool.args_schema,
-        execute=tool._run,
-        tags=tuple(configuration.tags),
-        metadata={
-            "display_name": configuration.display_name,
-            "connection_name": configuration.connection_name,
-            "connector": connection.configuration.connector,
-        },
-    )
-
-
 def create_tool(
     *, tool_name: str, tool_config: Mapping[str, Any], connection_manager: ConnectionManager
-) -> ToolDefinition:
-    """Build any named Snowflake tool with its resolved YAML settings."""
+) -> StructuredTool:
+    """Return a native LangChain tool directly from resolved YAML settings."""
     connector = tool_config["connector"]
     if connector != {"category": "RDBMS", "type": "SNOWFLAKE"}:
         raise ValueError(f"Tool '{tool_name}' requires an RDBMS/SNOWFLAKE connection")
-    configuration = ToolConfiguration.model_validate(
-        {
-            **{
-                key: value
-                for key, value in tool_config.items()
-                if key not in {"connector", "configuration"}
-            },
-            "name": tool_name,
-        }
-    )
+    connection_name = tool_config["connection_name"]
     connection_settings = SnowflakeConnectionConfiguration.model_validate(
         {
             **tool_config["configuration"],
-            "name": configuration.connection_name,
+            "name": connection_name,
             "connector": "snowflake",
         }
     )
     connection = connection_manager.get_or_create(
-        configuration.connection_name,
+        connection_name,
         lambda: SnowflakeConnection(
             connection_settings,
             connection_manager.resolve_secret,
             connection_manager.read_environment,
         ),
     )
-    return create_snowflake_tool(configuration, connection)
+    tool = SnowflakeTool(tool_name, tool_config, connection)
+
+    def execute(**arguments: Any) -> str:
+        try:
+            return tool._run(**arguments)
+        except Exception as exc:
+            raise ToolExecutionError(tool_name, str(exc)) from exc
+
+    return StructuredTool.from_function(
+        func=execute,
+        name=tool_name,
+        description=tool.description,
+        args_schema=SnowflakeToolInput,
+        tags=tool_config.get("tags", []),
+        metadata={
+            "display_name": tool_config.get("display_name"),
+            "connection_name": connection_name,
+            "connector": "snowflake",
+        },
+    )

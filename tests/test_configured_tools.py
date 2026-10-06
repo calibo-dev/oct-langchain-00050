@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import StructuredTool
 
 from latest_ai_development.core.errors import ToolExecutionError
 from latest_ai_development.core.settings import BASE_DIR, CONFIG_DIR, Settings
@@ -227,6 +228,56 @@ def test_only_selected_connections_are_validated(config_dir: Path) -> None:
         assert tuple(registry) == (TOOL_NAMES[0],)
     finally:
         registry.close()
+
+
+@pytest.mark.parametrize("named_connection", [True, False])
+def test_native_factory_signature_kwargs_and_reuse(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch, named_connection: bool
+) -> None:
+    from latest_ai_development.tools import snowflake_connection
+
+    received: list[dict[str, Any]] = []
+
+    # Match the LangGraph two-argument factory; no connection_manager is required.
+    def native_factory(
+        *, tool_name: str, tool_config: dict[str, Any], suffix: str
+    ) -> StructuredTool:
+        received.append(tool_config)
+
+        def echo(text: str) -> str:
+            return f"{text}{suffix}"
+
+        return StructuredTool.from_function(func=echo, name=tool_name, description="Echo input.")
+
+    monkeypatch.setattr(snowflake_connection, "native_factory", native_factory, raising=False)
+    entry = {
+        "factory": "latest_ai_development.tools.snowflake_connection:native_factory",
+        "factory_kwargs": {"suffix": "!"},
+    }
+    if named_connection:
+        entry["connection_name"] = "hospital_core_connection"
+    (config_dir / "tools.yml").write_text(yaml.safe_dump({"tools": {"echo": entry}}))
+    registry = build_tools_registry(["echo", "echo"], config_dir)
+    try:
+        assert registry["echo"].invoke({"text": "hello"}) == "hello!"
+        assert registry.get_tools() == [registry["echo"]]
+        assert len(received) == 1
+        if named_connection:
+            assert received[0]["configuration"]["account"] == "your_core_account"
+            assert received[0]["connector"]["type"] == "SNOWFLAKE"
+        else:
+            assert "configuration" not in received[0]
+    finally:
+        registry.close()
+
+
+def test_factory_kwargs_cannot_override_connection_wiring(config_dir: Path) -> None:
+    path = config_dir / "tools.yml"
+    configuration = yaml.safe_load(path.read_text())
+    configuration["tools"][TOOL_NAMES[0]]["factory_kwargs"] = {"tool_config": {}}
+    path.write_text(yaml.safe_dump(configuration))
+    with pytest.raises(ValueError, match="must not override resolved wiring"):
+        build_tools_registry([TOOL_NAMES[0]], config_dir)
 
 
 class ScriptedModel(BaseChatModel):
