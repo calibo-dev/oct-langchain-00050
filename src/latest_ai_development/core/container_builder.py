@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
+
+from langchain_core.tools import BaseTool, StructuredTool
 
 from latest_ai_development.agents.config import (
     collect_agent_model_references,
@@ -16,6 +19,7 @@ from latest_ai_development.agents.schema import AgentDefinition, AgentModel
 from latest_ai_development.context.config import load_context_configuration
 from latest_ai_development.context.runtime import ContextRuntime
 from latest_ai_development.core.container import ApplicationContainer
+from latest_ai_development.core.errors import ToolExecutionError
 from latest_ai_development.core.logging_config import configure_logging
 from latest_ai_development.core.settings import CONFIG_DIR, Settings, get_settings
 from latest_ai_development.core.settings_validator import validate_settings_configuration
@@ -33,6 +37,40 @@ from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 from latest_ai_development.workflow.validator import validate_workflow_configuration
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_tool_secret(name: str) -> str | None:
+    """Provide this template's secret backend to the portable tool registry."""
+    from latest_ai_development.core.secrets_manager import SecretsManager
+
+    return SecretsManager().get_secret(name)
+
+
+def _adapt_tool(implementation: Any) -> BaseTool:
+    """Keep LangChain wrapping and fail-fast errors outside shared provider files."""
+    if isinstance(implementation, BaseTool):
+        return implementation
+    if not callable(getattr(implementation, "execute", None)) or not getattr(
+        implementation, "args_schema", None
+    ):
+        raise TypeError("Tool factories must return a native tool or an executable implementation")
+
+    def execute(**arguments: Any) -> str:
+        try:
+            return implementation.execute(**arguments)
+        except ToolExecutionError:
+            raise
+        except Exception as exc:
+            raise ToolExecutionError(implementation.name, str(exc)) from exc
+
+    return StructuredTool.from_function(
+        func=execute,
+        name=implementation.name,
+        description=implementation.description,
+        args_schema=implementation.args_schema,
+        tags=getattr(implementation, "tags", []),
+        metadata=getattr(implementation, "metadata", {}),
+    )
 
 
 class ApplicationContainerBuilder:
@@ -169,7 +207,12 @@ class ApplicationContainerBuilder:
         tool_names: tuple[str, ...],
     ) -> ToolsRegistry:
         """Build selected native tools and retain their shared resource owner."""
-        registry = build_tools_registry(tool_names, CONFIG_DIR)
+        registry = build_tools_registry(
+            tool_names,
+            CONFIG_DIR,
+            resolve_secret=_resolve_tool_secret,
+            adapt_tool=_adapt_tool,
+        )
         logger.info("Tool objects created count=%s", len(registry))
         return registry
 

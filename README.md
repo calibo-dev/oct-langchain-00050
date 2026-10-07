@@ -31,7 +31,7 @@ src/latest_ai_development/
 ├── stages/                 # Workflow schemas and dependency validation
 ├── tools/
 │   ├── connection.py       # YAML loading, connection resolution, .env, lifecycle
-│   ├── tools_registry.py   # Resolve YAML, call factories, cache native LangChain tools
+│   ├── tools_registry.py   # Framework-neutral YAML/factory assembly and tool caching
 │   └── snowflake_connector.py  # One shared Snowflake factory and implementation
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
@@ -44,7 +44,8 @@ src/latest_ai_development/
 
 Tool metadata and connection properties have separate sources of truth. The
 registry joins them by `connection_name`, calls the configured provider factory,
-and stores the native LangChain tool it returns. Agents
+and lets `core/container_builder.py` wrap its implementation as a native LangChain
+tool before storing it. Agents
 reference the exact keys in `tools.yml`; all active agents reuse the same registry.
 
 ## Adding a connector
@@ -52,17 +53,25 @@ reference the exact keys in `tools.yml`; all active agents reuse the same regist
 Add one provider module in `tools/`, exporting a factory with this contract:
 
 ```python
-def create_tool(*, tool_name, tool_config, connection_manager) -> BaseTool:
+def create_tool(*, tool_name, tool_config, connection_manager):
     ...
 ```
 
 `tool_config` contains the tool metadata plus its resolved `connector` and
 `configuration` from `connection.yml`. The factory validates provider settings
 and uses `connection_manager.get_or_create(connection_name, factory)` to share
-connections by name. The factory returns a native LangChain `BaseTool` (for example,
-`StructuredTool`) directly. There is no intermediate tool-definition model or
-registry adapter. The registry retains the existing application shutdown lifecycle.
-Providers build their own input schemas, descriptions, and error handling.
+connections by name. Return a plain implementation exposing `name`, `description`,
+`args_schema`, and `execute(**arguments)`; optional `tags` and `metadata` are passed
+to LangChain. `core/container_builder.py` supplies the native `StructuredTool`
+adapter, secret resolver, and LangChain fail-fast error handling. Existing native
+LangChain factories also remain supported. The registry retains the existing
+application shutdown lifecycle. Providers build their own input schemas and
+descriptions; no intermediate tool-definition model is required.
+
+`tools_registry.py`, `connection.py`, and `snowflake_connector.py` are identical
+to their CrewAI-template counterparts and contain no framework imports. Only
+template-owned wiring differs, so a shared coding-agent Skill can generate the
+same provider files for either framework.
 
 Add records to `connection.yml` and `tools.yml`, then assign tool names in
 `agents.yaml`. Factories use `<module>:<attribute>` references, as in LangGraph.

@@ -7,13 +7,10 @@ import os
 import re
 from collections.abc import Callable, Mapping
 from threading import Lock
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 import pandas as pd
-from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from latest_ai_development.core.errors import ToolExecutionError
 
 from .connection import ConnectionManager
 
@@ -29,7 +26,7 @@ class SnowflakeAuthentication(BaseModel):
     secret: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_sources(self) -> Self:
+    def validate_sources(self) -> SnowflakeAuthentication:
         if self.direct_pat_token == self.secret:
             raise ValueError("directPatToken and secret must reference different variables")
         return self
@@ -195,7 +192,46 @@ class SnowflakeTool:
     ) -> None:
         self.name = tool_name
         self.description = self._build_description(tool_config, connection)
+        self.tags = tool_config.get("tags", [])
+        self.metadata = {
+            "display_name": tool_config.get("display_name"),
+            "connection_name": connection.configuration.name,
+            "connector": "snowflake",
+        }
         self._connection = connection
+
+    def execute(self, **arguments: Any) -> str:
+        """Execute with common tool/connection logs, independent of the agent framework."""
+        connection_name = self._connection.configuration.name
+        action = (
+            "sql"
+            if (arguments.get("query") or "").strip()
+            else f"metadata:{arguments.get('metadata_scope') or 'auto'}"
+        )
+        logger.info(
+            "Tool call started | tool=%s | connection=%s | action=%s",
+            self.name,
+            connection_name,
+            action,
+        )
+        try:
+            result = self._run(**arguments)
+        except Exception as exc:
+            logger.error(
+                "Tool call failed | tool=%s | connection=%s | action=%s | error_type=%s",
+                self.name,
+                connection_name,
+                action,
+                type(exc).__name__,
+            )
+            raise
+        logger.info(
+            "Tool call completed | tool=%s | connection=%s | action=%s",
+            self.name,
+            connection_name,
+            action,
+        )
+        return result
 
     @staticmethod
     def _build_description(tool_config: Mapping[str, Any], connection: SnowflakeConnection) -> str:
@@ -607,7 +643,7 @@ class SnowflakeTool:
             return None
         try:
             return min(max(int(row_limit), 1), 5000)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
 
     def _should_apply_row_limit(self, query: str) -> bool:
@@ -645,8 +681,8 @@ class SnowflakeTool:
 
 def create_tool(
     *, tool_name: str, tool_config: Mapping[str, Any], connection_manager: ConnectionManager
-) -> StructuredTool:
-    """Return a native LangChain tool directly from resolved YAML settings."""
+) -> SnowflakeTool:
+    """Return a portable implementation; the template wraps it as a native tool."""
     connector = tool_config["connector"]
     if connector != {"category": "RDBMS", "type": "SNOWFLAKE"}:
         raise ValueError(f"Tool '{tool_name}' requires an RDBMS/SNOWFLAKE connection")
@@ -666,48 +702,4 @@ def create_tool(
             connection_manager.read_environment,
         ),
     )
-    tool = SnowflakeTool(tool_name, tool_config, connection)
-
-    def execute(**arguments: Any) -> str:
-        action = (
-            "sql"
-            if (arguments.get("query") or "").strip()
-            else f"metadata:{arguments.get('metadata_scope') or 'auto'}"
-        )
-        logger.info(
-            "Tool call started | tool=%s | connection=%s | action=%s",
-            tool_name,
-            connection_name,
-            action,
-        )
-        try:
-            result = tool._run(**arguments)
-        except Exception as exc:
-            logger.error(
-                "Tool call failed | tool=%s | connection=%s | action=%s | error_type=%s",
-                tool_name,
-                connection_name,
-                action,
-                type(exc).__name__,
-            )
-            raise ToolExecutionError(tool_name, str(exc)) from exc
-        logger.info(
-            "Tool call completed | tool=%s | connection=%s | action=%s",
-            tool_name,
-            connection_name,
-            action,
-        )
-        return result
-
-    return StructuredTool.from_function(
-        func=execute,
-        name=tool_name,
-        description=tool.description,
-        args_schema=SnowflakeToolInput,
-        tags=tool_config.get("tags", []),
-        metadata={
-            "display_name": tool_config.get("display_name"),
-            "connection_name": connection_name,
-            "connector": "snowflake",
-        },
-    )
+    return SnowflakeTool(tool_name, tool_config, connection)

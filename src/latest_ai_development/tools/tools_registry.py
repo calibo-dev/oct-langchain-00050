@@ -1,4 +1,4 @@
-"""Assemble LangChain tools from tools.yml factories and named connection.yml settings."""
+"""Assemble tools from YAML; the owning template supplies its native adapter."""
 
 from __future__ import annotations
 
@@ -8,35 +8,24 @@ from inspect import signature
 from pathlib import Path
 from typing import Any
 
-from langchain_core.tools import BaseTool
-
-from latest_ai_development.core.settings import CONFIG_DIR
-
 from .connection import ConnectionManager, load_entries, resolve_tool_config
 
-
-def _resolve_secret(name: str) -> str | None:
-    """Supply the template's secret backend without coupling integrations to it."""
-    from latest_ai_development.core.secrets_manager import SecretsManager
-
-    return SecretsManager().get_secret(name)
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 
-class ToolsRegistry(dict[str, BaseTool]):
-    """A dictionary of native tools with application-owned connection cleanup."""
+class ToolsRegistry(dict[str, Any]):
+    """A dictionary of tools with owner-managed connection cleanup."""
 
-    def __init__(
-        self, tools: Mapping[str, BaseTool], manager: ConnectionManager | None = None
-    ) -> None:
+    def __init__(self, tools: Mapping[str, Any], manager: ConnectionManager | None = None) -> None:
         super().__init__(tools)
         self._manager = manager
 
-    def get_tools(self) -> list[BaseTool]:
-        """Return the tools when a LangChain caller needs a list."""
+    def get_tools(self) -> list[Any]:
+        """Return the registered tools as a list."""
         return list(self.values())
 
     def close(self) -> None:
-        """Close shared provider connections at application shutdown."""
+        """Close shared provider connections when the owner finishes."""
         if self._manager is not None:
             self._manager.close()
 
@@ -45,8 +34,10 @@ def build_tools_registry(
     tool_names: Iterable[str] | None = None,
     config_dir: Path = CONFIG_DIR,
     resolve_secret: Callable[[str], str | None] | None = None,
+    *,
+    adapt_tool: Callable[[Any], Any] | None = None,
 ) -> ToolsRegistry:
-    """Resolve both YAML files and cache the native tools returned by their factories."""
+    """Resolve factories, optionally adapt their results, and retain resource ownership."""
     selected = None if tool_names is None else tuple(dict.fromkeys(tool_names))
     if selected == ():
         return ToolsRegistry({})
@@ -57,14 +48,18 @@ def build_tools_registry(
         raise ValueError(f"Missing workflow tools: {sorted(missing)}")
     if not selected:
         return ToolsRegistry({})
-    manager = ConnectionManager(config_dir, resolve_secret or _resolve_secret)
+    manager = ConnectionManager(config_dir, resolve_secret)
     try:
         tools = {}
         for name in selected:
             if "name" in entries[name]:
                 raise ValueError(f"Tool '{name}' must use its YAML mapping key as its name")
             resolved = resolve_tool_config(name, entries[name], manager.configurations)
-            tools[name] = _load_configured_tool(name, resolved, manager)
+            implementation = _load_configured_tool(name, resolved, manager)
+            tool = adapt_tool(implementation) if adapt_tool is not None else implementation
+            if getattr(tool, "name", None) != name:
+                raise ValueError(f"Adapter for '{name}' must preserve the tool name")
+            tools[name] = tool
     except Exception:
         manager.close()
         raise
@@ -73,7 +68,7 @@ def build_tools_registry(
 
 def _load_configured_tool(
     tool_name: str, tool_config: Mapping[str, Any], manager: ConnectionManager
-) -> BaseTool:
+) -> Any:
     """Call a YAML factory using the same signature-based approach as LangGraph."""
     reference = tool_config.get("factory")
     if not isinstance(reference, str):
@@ -101,6 +96,6 @@ def _load_configured_tool(
         if key in parameters:
             resolved_kwargs[key] = value
     tool = factory(**resolved_kwargs)
-    if not isinstance(tool, BaseTool) or tool.name != tool_name:
-        raise ValueError(f"Factory for '{tool_name}' must return a matching LangChain tool")
+    if getattr(tool, "name", None) != tool_name:
+        raise ValueError(f"Factory for '{tool_name}' must return a matching named tool")
     return tool

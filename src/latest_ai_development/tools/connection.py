@@ -6,12 +6,13 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 from dotenv import dotenv_values
 
-from latest_ai_development.core.settings import BASE_DIR
+BASE_DIR = Path(__file__).resolve().parents[3]
+Connection = TypeVar("Connection")
 
 
 def load_entries(path: Path, key: str) -> dict[str, dict[str, Any]]:
@@ -73,7 +74,7 @@ def resolve_tool_config(
 
 
 class ConnectionManager:
-    """One connection object per name within an application process."""
+    """One connection object per name within the owning registry's lifetime."""
 
     def __init__(
         self,
@@ -93,7 +94,7 @@ class ConnectionManager:
             os.environ.get(variable_name, self._environment.get(variable_name)) or ""
         ).strip()
 
-    def get_or_create[Connection](self, name: str, factory: Callable[[], Connection]) -> Connection:
+    def get_or_create(self, name: str, factory: Callable[[], Connection]) -> Connection:
         """Reuse a named connection, including when tools are created concurrently."""
         with self._lock:
             if name not in self._connections:
@@ -114,4 +115,4 @@ class ConnectionManager:
             except Exception as exc:
                 errors.append(exc)
         if errors:
-            raise ExceptionGroup("Tool connection cleanup failed", errors)
+            raise RuntimeError(f"Failed to close {len(errors)} tool connection(s)") from errors[0]
