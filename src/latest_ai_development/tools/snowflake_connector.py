@@ -669,10 +669,35 @@ def create_tool(
     tool = SnowflakeTool(tool_name, tool_config, connection)
 
     def execute(**arguments: Any) -> str:
+        action = (
+            "sql"
+            if (arguments.get("query") or "").strip()
+            else f"metadata:{arguments.get('metadata_scope') or 'auto'}"
+        )
+        logger.info(
+            "Tool call started | tool=%s | connection=%s | action=%s",
+            tool_name,
+            connection_name,
+            action,
+        )
         try:
-            return tool._run(**arguments)
+            result = tool._run(**arguments)
         except Exception as exc:
+            logger.error(
+                "Tool call failed | tool=%s | connection=%s | action=%s | error_type=%s",
+                tool_name,
+                connection_name,
+                action,
+                type(exc).__name__,
+            )
             raise ToolExecutionError(tool_name, str(exc)) from exc
+        logger.info(
+            "Tool call completed | tool=%s | connection=%s | action=%s",
+            tool_name,
+            connection_name,
+            action,
+        )
+        return result
 
     return StructuredTool.from_function(
         func=execute,

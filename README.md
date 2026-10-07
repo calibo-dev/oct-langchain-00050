@@ -2,7 +2,8 @@
 
 A FastAPI application that builds agents, models, tools and workflow stages from
 YAML. The included example exposes hospital, patient, and doctor Snowflake tools
-through the existing two-agent LangChain workflow.
+through a two-agent LangChain workflow: `snowflake_data_agent` retrieves evidence,
+then `snowflake_answer_agent` summarizes it for the caller.
 
 ## Startup and request flow
 
@@ -31,7 +32,7 @@ src/latest_ai_development/
 ├── tools/
 │   ├── connection.py       # YAML loading, connection resolution, .env, lifecycle
 │   ├── tools_registry.py   # Resolve YAML, call factories, cache native LangChain tools
-│   └── snowflake_connection.py  # One shared Snowflake factory and implementation
+│   └── snowflake_connector.py  # One shared Snowflake factory and implementation
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
     ├── agents.yaml
@@ -149,7 +150,7 @@ Tool metadata and the factory reference live in `tools.yml`:
 ```yaml
 tools:
   snowflake_table_hospitals:
-    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    factory: latest_ai_development.tools.snowflake_connector:create_tool
     connection_name: hospital_core_connection
     description: Query hospital profile and capacity data from Snowflake.
     purpose: Retrieve hospital names, locations, ownership, bed capacity, and facilities.
@@ -226,20 +227,13 @@ native environment configuration: `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`,
 ## Verification and migration
 
 ```sh
-uv run --extra dev --extra snowflake pytest -q
-uv run --extra dev ruff check src tests
+uv run --extra dev ruff check src
 ```
 
 Before running the real application, replace the example account/user/warehouse
 values in `connection.yml` and populate the two PAT sources in `.env`. The existing
 OpenAI model setup also needs `OPENAI_API_KEY_SECRET` and cloud authentication for
 the configured secret backend; this tool change keeps that behavior.
-
-`tests/test_configured_tools.py` verifies the three-tool/two-connection mapping,
-credential selection, connection reuse/cleanup, SQL rejection, YAML validation,
-and the actual FastAPI → LangChain agents → metadata/SQL tools → response flow.
-Only the external LLM and Snowflake client are simulated. These tests do not prove
-live Snowflake authentication or live model tool selection.
 
 This replaces the research/reporting classes, chain builders and separate
 `workflow.yaml`. It returns JSON and does not automatically persist `report.md`.

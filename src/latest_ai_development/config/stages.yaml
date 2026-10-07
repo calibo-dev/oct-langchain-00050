@@ -4,24 +4,24 @@ workflow:
   inputs:
     - topic
   stages:
-    - name: content_drafting_agent
+    - name: retrieve_snowflake_data
       execution: sequential
       depends_on: []
       agents:
-        - content_drafting_agent
+        - snowflake_data_agent
       inputs:
         - topic
       outputs:
-        - draft
+        - data_findings
 
-    - name: content_review_agent
+    - name: summarize_snowflake_data
       execution: sequential
       depends_on:
-        - content_drafting_agent
+        - retrieve_snowflake_data
       agents:
-        - content_review_agent
+        - snowflake_answer_agent
       inputs:
         - topic
-        - draft
+        - data_findings
       outputs:
         - final_response

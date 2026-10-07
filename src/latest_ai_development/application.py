@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="LangChain workflow for configuration-driven content generation",
+        description="Configuration-driven LangChain workflow with shared provider tools",
         root_path=api_root_path,
         lifespan=lifespan,
     )

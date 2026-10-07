@@ -4,11 +4,12 @@ connections:
   hospital_core_connection:
     connector: {category: RDBMS, type: SNOWFLAKE}
     configuration:
-      account: your_core_account
-      user: your_core_user
-      warehouse: your_core_warehouse
-      database: null  # Optional: set your database to guide metadata discovery.
-      schema: null    # Optional: set your schema to guide metadata discovery.
+      host: dtvescn-xpb43166.snowflakecomputing.com
+      account: DTVESCN-XPB43166
+      user: DEV_SVC_USER
+      warehouse: DEV_WH
+      database: DEV_DB
+      schema: DEV_SCHEMA    
       authentication:
         directPatToken: SNOWFLAKE_HOSPITAL_CORE_PAT_TOKEN
         secret: SNOWFLAKE_HOSPITAL_CORE_PAT_SECRET_NAME
@@ -20,11 +21,12 @@ connections:
   hospital_staff_connection:
     connector: {category: RDBMS, type: SNOWFLAKE}
     configuration:
-      account: your_staff_account
-      user: your_staff_user
-      warehouse: your_staff_warehouse
-      database: null
-      schema: null
+      host: dtvescn-xpb43166.snowflakecomputing.com
+      account: DTVESCN-XPB43166
+      user: DEV_SVC_USER
+      warehouse: DEV_WH
+      database: DEV_DB
+      schema: DEV_SCHEMA
       authentication:
         directPatToken: SNOWFLAKE_HOSPITAL_STAFF_PAT_TOKEN
         secret: SNOWFLAKE_HOSPITAL_STAFF_PAT_SECRET_NAME

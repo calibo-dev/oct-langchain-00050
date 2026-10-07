@@ -2,7 +2,7 @@
 # Named connection settings belong in connection.yml.
 tools:
   snowflake_table_hospitals:
-    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    factory: latest_ai_development.tools.snowflake_connector:create_tool
     connection_name: hospital_core_connection
     display_name: Hospital Data
     description: Query hospital profile and capacity data from Snowflake.
@@ -17,7 +17,7 @@ tools:
       - Do not execute mutating or administrative SQL.
 
   snowflake_table_patients:
-    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    factory: latest_ai_development.tools.snowflake_connector:create_tool
     connection_name: hospital_core_connection
     display_name: Patient Data
     description: Query patient admission and room-utilization data from Snowflake.
@@ -32,7 +32,7 @@ tools:
       - Do not execute mutating or administrative SQL.
 
   snowflake_table_doctors:
-    factory: latest_ai_development.tools.snowflake_connection:create_tool
+    factory: latest_ai_development.tools.snowflake_connector:create_tool
     connection_name: hospital_staff_connection
     display_name: Doctor Data
     description: Query doctor, specialty, and hospital-affiliation data from Snowflake.
