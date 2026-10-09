@@ -1,22 +1,21 @@
 # LangChain Python Template
 
-A FastAPI application that builds agents, models, tools and workflow stages from
-YAML. The included example exposes hospital, patient, and doctor Snowflake tools
-through a two-agent LangChain workflow: `snowflake_data_agent` retrieves evidence,
-then `snowflake_answer_agent` summarizes it for the caller.
+A FastAPI application that builds agents, models and workflow stages from YAML.
+The included example uses a two-agent LangChain workflow: `content_drafting_agent`
+creates a draft, then `content_review_agent` produces the final response.
 
 ## Startup and request flow
 
 1. Read and validate environment settings.
 2. Load `stages.yaml` and find its active agents.
-3. Load the models, tools and named connections those agents reference.
+3. Load the models those agents reference and detect any configured tool names.
 4. Validate references and stage input/output contracts.
-5. Build shared connection, model, tool and agent registries.
+5. Build shared model and agent registries.
 6. Register a POST route and request schema from the workflow definition.
 7. Execute stages in YAML order and pass outputs to downstream agents.
 
-Models and agents are created once per application process. Snowflake connections
-open lazily, are reused by name, and close at application shutdown.
+Models and agents are created once per application process. Tool runtime modules
+are optional and are loaded only when an agent configures tools.
 
 ## Layout
 
@@ -29,58 +28,16 @@ src/latest_ai_development/
 ├── agents/                 # Configuration, factories and fallback runtime
 ├── models/                 # Provider model builders and registry
 ├── stages/                 # Workflow schemas and dependency validation
-├── tools/
-│   ├── connection.py       # YAML loading, connection resolution, .env, lifecycle
-│   ├── tools_registry.py   # Framework-neutral YAML/factory assembly and tool caching
-│   └── snowflake_connector.py  # One shared Snowflake factory and implementation
 ├── workflow/               # Execution, prompts, response parsing and traces
 └── config/
     ├── agents.yaml
     ├── models.yaml
-    ├── stages.yaml
-    ├── connection.yml
-    └── tools.yml
+    └── stages.yaml
 ```
 
-Tool metadata and connection properties have separate sources of truth. The
-registry joins them by `connection_name`, calls the configured provider factory,
-and lets `core/container_builder.py` wrap its implementation as a native LangChain
-tool before storing it. Agents
-reference the exact keys in `tools.yml`; all active agents reuse the same registry.
-
-## Adding a connector
-
-Add one provider module in `tools/`, exporting a factory with this contract:
-
-```python
-def create_tool(*, tool_name, tool_config, connection_manager):
-    ...
-```
-
-`tool_config` contains the tool metadata plus its resolved `connector` and
-`configuration` from `connection.yml`. The factory validates provider settings
-and uses `connection_manager.get_or_create(connection_name, factory)` to share
-connections by name. Return a plain implementation exposing `name`, `description`,
-`args_schema`, and `execute(**arguments)`; optional `tags` and `metadata` are passed
-to LangChain. `core/container_builder.py` supplies the native `StructuredTool`
-adapter, secret resolver, and LangChain fail-fast error handling. Existing native
-LangChain factories also remain supported. The registry retains the existing
-application shutdown lifecycle. Providers build their own input schemas and
-descriptions; no intermediate tool-definition model is required.
-
-`tools_registry.py`, `connection.py`, and `snowflake_connector.py` are identical
-to their CrewAI-template counterparts and contain no framework imports. Only
-template-owned wiring differs, so a shared coding-agent Skill can generate the
-same provider files for either framework.
-
-Add records to `connection.yml` and `tools.yml`, then assign tool names in
-`agents.yaml`. Factories use `<module>:<attribute>` references, as in LangGraph.
-The registry passes `tool_name`, resolved `tool_config`, and `connection_manager`
-only when declared in the factory signature. Optional `factory_kwargs` supply
-non-secret constructor parameters and cannot override these wiring arguments.
-Tools without `connection_name` can use standalone factories. Multiple tools may
-use the same factory and connection, or the same factory with different
-connections. Restart after YAML changes. Add provider dependencies when needed.
+The base template intentionally does not include a tool runtime. Code generation
+adds the required tool modules, configuration and dependencies only when the
+design assigns tools to an agent.
 
 ## Configuration
 
@@ -112,89 +69,6 @@ Agents return JSON containing their declared output fields. Intermediate values
 can be structured JSON. Terminal-stage outputs form the API response, with their
 values converted to strings to preserve the v1 response contract.
 
-## Required tool execution
-
-An agent can require evidence that a configured tool ran:
-
-```yaml
-# Require a tool response on every invocation (metadata fetching).
-required_tool_when: {}
-```
-
-Or require it only when all configured input conditions match:
-
-```yaml
-# SQL execution can skip the tool when query validation is invalid.
-required_tool_when:
-  query_validation_status: valid
-```
-
-Omit the field for optional tool use. Missing required tool responses fail the
-workflow instead of accepting invented execution results. This does not force a
-model to call a tool or prove SQL/summary correctness. OpenAI strict tool schemas
-validate call arguments; they do not guarantee execution.
-
-## Snowflake
-
-Non-secret account, user, warehouse, optional host/database/schema, connection
-options, and authentication variable names live in `connection.yml`:
-
-```yaml
-connections:
-  hospital_core_connection:
-    connector: {category: RDBMS, type: SNOWFLAKE}
-    configuration:
-      account: your_account
-      user: your_user
-      warehouse: your_warehouse
-      database: your_database  # Optional
-      schema: your_schema      # Optional
-      authentication:
-        directPatToken: SNOWFLAKE_HOSPITAL_CORE_PAT_TOKEN
-        secret: SNOWFLAKE_HOSPITAL_CORE_PAT_SECRET_NAME
-```
-
-Tool metadata and the factory reference live in `tools.yml`:
-
-```yaml
-tools:
-  snowflake_table_hospitals:
-    factory: latest_ai_development.tools.snowflake_connector:create_tool
-    connection_name: hospital_core_connection
-    description: Query hospital profile and capacity data from Snowflake.
-    purpose: Retrieve hospital names, locations, ownership, bed capacity, and facilities.
-    tags: [snowflake, hospitals, read-only]
-    usage_guidelines: [Discover tables and columns before writing SQL.]
-    non_usage_guidelines: [Do not modify data.]
-```
-
-Populate exactly one environment variable referenced by each connection's
-`authentication`:
-
-- `directPatToken`: its environment variable contains the PAT.
-- `secret`: its environment variable contains a secret-manager name whose value
-  is the PAT, resolved through AWS Secrets Manager or Azure Key Vault.
-
-Variable names are explicit YAML references, not automatically derived prefixes.
-The connection manager reads them from the project `.env` with process environment
-values taking precedence. Account/user/warehouse values are required in YAML;
-no `SNOWFLAKE_*_ACCOUNT`, `*_USER`, or `*_WAREHOUSE` environment variables are read.
-
-| Tool | Connection | Direct PAT variable |
-| --- | --- | --- |
-| `snowflake_table_hospitals` | `hospital_core_connection` | `SNOWFLAKE_HOSPITAL_CORE_PAT_TOKEN` |
-| `snowflake_table_patients` | `hospital_core_connection` | Same core PAT |
-| `snowflake_table_doctors` | `hospital_staff_connection` | `SNOWFLAKE_HOSPITAL_STAFF_PAT_TOKEN` |
-
-All three use one Python implementation for authentication, metadata discovery,
-read-only SQL execution, and formatting. Connection objects are reused by name;
-actual Snowflake clients open on first use. Shutdown closes each shared connection
-once. Missing references, mixed inline/named settings, duplicate YAML keys, and
-invalid active provider settings fail during startup.
-
-Tool purposes and guidelines guide the model; they do not restrict access to
-specific tables. Use read-only Snowflake users with the required database grants.
-
 ## Environment and running
 
 Start with `.env.example`. Every field in `core/settings.py` must be supplied;
@@ -206,8 +80,8 @@ nonblank; this runner does not automatically load retrieval files.
 With Python 3.14:
 
 ```sh
-uv sync --extra dev --extra snowflake
-uv run --extra snowflake latest_ai_development
+uv sync --extra dev
+uv run latest_ai_development
 ```
 
 Host and port come from the environment. Docker startup and DevOps files are
@@ -218,7 +92,7 @@ POST /langchain_python_template
 Content-Type: application/json
 
 {
-  "topic": "Discover hospital, patient, and doctor tables using all three Snowflake tools."
+  "topic": "Explain configuration-driven agent workflows."
 }
 ```
 
@@ -239,10 +113,8 @@ native environment configuration: `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`,
 uv run --extra dev ruff check src
 ```
 
-Before running the real application, replace the example account/user/warehouse
-values in `connection.yml` and populate the two PAT sources in `.env`. The existing
-OpenAI model setup also needs `OPENAI_API_KEY_SECRET` and cloud authentication for
-the configured secret backend; this tool change keeps that behavior.
+The OpenAI model setup needs `OPENAI_API_KEY_SECRET` and cloud authentication for
+the configured secret backend.
 
 This replaces the research/reporting classes, chain builders and separate
 `workflow.yaml`. It returns JSON and does not automatically persist `report.md`.

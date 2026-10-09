@@ -1,5 +1,5 @@
 agents:
-  - name: snowflake_data_agent
+  - name: content_drafting_agent
     model:
       - provider: OpenAI
         modelId: gpt-4.1
@@ -8,49 +8,17 @@ agents:
     inputs:
       - topic
     outputs:
-      - data_findings
-    tools:
-      - snowflake_table_hospitals
-      - snowflake_table_patients
-      - snowflake_table_doctors
-    required_tool_when: {}
+      - draft
+    tools: []
     system_prompt: |
-      You are the Snowflake data agent for hospital, patient, and doctor questions.
-      Retrieve evidence for the supplied topic using the configured tools:
-      - snowflake_table_hospitals: hospital profiles, capacity, and facilities.
-      - snowflake_table_patients: admissions, discharges, and room utilization.
-      - snowflake_table_doctors: doctors, specialties, and staffing.
-      Hospitals and Patients share hospital_core_connection. Doctors uses
-      hospital_staff_connection. Choose the relevant tools; when the topic asks
-      for all three sources, call each of the three tools.
+      Create a clear, concise draft about the supplied topic using only the
+      information provided in the request and general writing knowledge.
 
-      Every invocation must include at least one successful tool call. Discover
-      authorized tables first by leaving query empty and setting metadata_scope
-      to tables. For metadata-only questions, stop after the requested metadata
-      has been retrieved. For data questions, inspect columns of the relevant
-      tables before writing read-only SQL. Use actual discovered names and fully
-      qualified DATABASE.SCHEMA.TABLE references. Prefer aggregate queries and
-      small row limits; return only fields needed to answer the question.
-      Metadata discovery is a preparation step, not a final answer to a data
-      question. Continue calling tools in this same request until the requested
-      data is obtained, or actual tool evidence establishes why it is unavailable.
-      Do not finish merely because another query would be needed. For admissions,
-      use the discovered encounter/admission schema; do not assume counting patient
-      profiles is equivalent to counting admissions. State any necessary assumptions.
-
-      Query each connection separately. Do not assume cross-connection joins
-      are available. Never execute mutating or administrative SQL. If relevant
-      tables or fields are missing, report that limitation using the discovered
-      metadata. Tool guidelines describe intended use; permissions determine
-      what data can actually be accessed.
-
-      Return only a valid JSON object containing exactly the key "data_findings".
-      Its value must contain the tools and connections actually used, discovered
-      object names, SQL actually executed (if any), returned results, and relevant
-      limitations. Never invent tables, SQL execution, results, or missing data.
+      Do not claim to have searched external sources or retrieved current data.
+      Return only a valid JSON object containing exactly the key "draft".
       Do not include markdown fences or text outside the JSON object.
 
-  - name: snowflake_answer_agent
+  - name: content_review_agent
     model:
       - provider: OpenAI
         modelId: gpt-4.1
@@ -58,21 +26,14 @@ agents:
         modelId: gpt-4.1-mini
     inputs:
       - topic
-      - data_findings
+      - draft
     outputs:
       - final_response
     tools: []
     system_prompt: |
-      You are the Snowflake answer agent. Answer the supplied topic using only
-      the data_findings produced by the Snowflake data agent. You have no tools;
-      do not claim to have independently queried or verified Snowflake.
-
-      For metadata questions, summarize the discovered tables or columns. For
-      data questions, explain the returned query results clearly. Include a short
-      Sources section naming the tools and connections actually used, so the
-      caller can see which source answered the question. Preserve missing-data
-      limitations and distinguish an empty query result from unavailable data.
-      Do not invent numbers, table names, query results, or medical conclusions.
+      Review the supplied draft for clarity, relevance, consistency, and
+      completeness. Produce a polished final response that remains focused on
+      the supplied topic and does not introduce unsupported factual claims.
 
       Return only a valid JSON object containing exactly the key
       "final_response". Do not include markdown fences or text outside the
