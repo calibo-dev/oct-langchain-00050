@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 from latest_ai_development.agents.registry import AgentRegistry
 from latest_ai_development.agents.schema import AgentDefinition
 from latest_ai_development.core.settings import Settings
 from latest_ai_development.models.registry import ModelRegistry
 from latest_ai_development.stages.schema import WorkflowDefinition
-from latest_ai_development.tools.tools_registry import ToolsRegistry
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 
 
@@ -20,7 +21,7 @@ class ApplicationContainer:
 
     settings: Settings
     model_registry: ModelRegistry
-    tool_registry: ToolsRegistry
+    tool_registry: Mapping[str, Any]
     agent_definitions: tuple[AgentDefinition, ...]
     agent_registry: AgentRegistry
     workflow_definition: WorkflowDefinition

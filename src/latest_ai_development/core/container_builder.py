@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -29,10 +30,6 @@ from latest_ai_development.models.registry import ModelRegistry
 from latest_ai_development.models.schema import ModelsConfiguration
 from latest_ai_development.stages.config import load_workflow_definition
 from latest_ai_development.stages.schema import WorkflowDefinition
-from latest_ai_development.tools.tools_registry import (
-    ToolsRegistry,
-    build_tools_registry,
-)
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 from latest_ai_development.workflow.validator import validate_workflow_configuration
 
@@ -130,7 +127,9 @@ class ApplicationContainerBuilder:
             )
             logger.debug("\n\nBuilt workflow:\n%s", workflow)
         except Exception:
-            tool_registry.close()
+            close = getattr(tool_registry, "close", None)
+            if callable(close):
+                close()
             raise
 
         logger.info("Application startup completed")
@@ -205,8 +204,24 @@ class ApplicationContainerBuilder:
     def _load_active_tools(
         self,
         tool_names: tuple[str, ...],
-    ) -> ToolsRegistry:
+    ) -> Mapping[str, Any]:
         """Build selected native tools and retain their shared resource owner."""
+        if not tool_names:
+            logger.info("No active tools configured")
+            return {}
+
+        try:
+            from latest_ai_development.tools.tools_registry import build_tools_registry
+        except ModuleNotFoundError as exc:
+            if exc.name in {
+                "latest_ai_development.tools",
+                "latest_ai_development.tools.tools_registry",
+            }:
+                raise RuntimeError(
+                    f"Tool runtime is missing for configured tools: {list(tool_names)}"
+                ) from exc
+            raise
+
         registry = build_tools_registry(
             tool_names,
             CONFIG_DIR,
@@ -221,7 +236,7 @@ class ApplicationContainerBuilder:
         workflow_definition: WorkflowDefinition,
         agent_definitions: tuple[AgentDefinition, ...],
         models_configuration: ModelsConfiguration,
-        tool_registry: ToolsRegistry,
+        tool_registry: Mapping[str, Any],
     ) -> None:
         """Validate references before constructing external runtime objects."""
         validate_workflow_configuration(
@@ -246,7 +261,7 @@ class ApplicationContainerBuilder:
         self,
         definitions: tuple[AgentDefinition, ...],
         model_registry: ModelRegistry,
-        tool_registry: ToolsRegistry,
+        tool_registry: Mapping[str, Any],
         context_configuration: ContextRuntime | None = None,
     ) -> AgentRegistry:
         """Create runtime LangChain agents."""
