@@ -1,5 +1,5 @@
 # One entry per tool. All three use the same Snowflake Python factory.
-# Named connection settings belong in connection.yml.
+# Named connection settings belong in connection.yaml.
 tools:
   snowflake_table_hospitals:
     factory: latest_ai_development.tools.snowflake_connector:create_tool
@@ -45,3 +45,4 @@ tools:
     non_usage_guidelines:
       - Do not use for patient admission or room-utilization questions.
       - Do not execute mutating or administrative SQL.
+
