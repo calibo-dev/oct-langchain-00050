@@ -77,7 +77,7 @@ unused provider secret names and the unused cloud-backend field may be empty.
 `DEBUG`, `LOG_LEVEL`, `PORT` and `CONTEXT` have no code defaults. `CONTEXT` must be
 nonblank; this runner does not automatically load retrieval files.
 
-With Python 3.14:
+With Python 3.11:
 
 ```sh
 uv sync --extra dev
