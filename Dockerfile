@@ -1,5 +1,5 @@
 # ------------- Builder Stage -------------
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm AS builder
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev
 
 # ------------- Runtime Stage -------------
-FROM python:3.14-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 # Install minimal runtime packages
 RUN apt-get update -y \

@@ -1,0 +1,40 @@
+agents:
+  - name: content_drafting_agent
+    model:
+      - provider: OpenAI
+        modelId: gpt-4.1
+      - provider: OpenAI
+        modelId: gpt-4.1-mini
+    inputs:
+      - topic
+    outputs:
+      - draft
+    tools: []
+    system_prompt: |
+      Create a clear, concise draft about the supplied topic using only the
+      information provided in the request and general writing knowledge.
+
+      Do not claim to have searched external sources or retrieved current data.
+      Return only a valid JSON object containing exactly the key "draft".
+      Do not include markdown fences or text outside the JSON object.
+
+  - name: content_review_agent
+    model:
+      - provider: OpenAI
+        modelId: gpt-4.1
+      - provider: OpenAI
+        modelId: gpt-4.1-mini
+    inputs:
+      - topic
+      - draft
+    outputs:
+      - final_response
+    tools: []
+    system_prompt: |
+      Review the supplied draft for clarity, relevance, consistency, and
+      completeness. Produce a polished final response that remains focused on
+      the supplied topic and does not introduce unsupported factual claims.
+
+      Return only a valid JSON object containing exactly the key
+      "final_response". Do not include markdown fences or text outside the
+      JSON object.

@@ -1,145 +1,27 @@
-research:
-  system_prompt: |
-    You are a senior research analyst responsible for gathering
-    accurate and relevant information about the given topic.
-
-  instructions:
-    - Focus on factual accuracy
-    - Identify key insights
-    - Highlight risks and assumptions
-    - Provide structured research notes for downstream reporting
-
-  output_sections:
-    - Topic Overview
-    - Key Findings
-    - Important Details
-    - Risks / Assumptions
-    - Suggested Report Outline
-
-  use_tools: true
-  use_retrieval: false
-  model:
-    primary:
-      provider: OpenAI
-      modelId: gpt-4.1-mini
-      generationDefaults:
-        temperature: 0.7
-        topP: 0.7
-        maxOutputTokens: 4000
-    fallback:
-      provider: OpenAI
-      modelId: gpt-4.1-nano
-      generationDefaults:
-        temperature: 0.7
-        topP: 0.7
-        maxOutputTokens: 4000
-
-
-reporting:
-  system_prompt: |
-    You are a professional reporting analyst responsible for converting
-    research notes into a structured markdown report.
-
-  instructions:
-    - Produce a structured markdown report
-    - Avoid unsupported claims
-    - Keep the report easy to scan
-    - Use clear headings and sections
-  model:
-    primary:
-      provider: OpenAI
-      modelId: gpt-4.1-mini
-      generationDefaults:
-        temperature: 0.3
-        topP: 0.7
-        maxOutputTokens: 4000
-    fallback:
-      provider: OpenAI
-      modelId: gpt-4.1-nano
-      generationDefaults:
-        temperature: 0.3
-        topP: 0.7
-        maxOutputTokens: 4000
-
-tracing:
-  workflow:
-    enabled: true
-    name: Research Reporting Workflow
-    run_type: chain
-    tags:
-      - workflow
-      - multi-agent
-    metadata:
-      workflow_name: research_reporting
-      workflow_version: "1.0"
-    input_fields:
-      flow_run_id: flow_run_id
-      topic: inputs.topic
-      current_year: inputs.current_year
-      knowledge_context_present:
-        path: inputs.knowledge_context
-        transform: bool
-    output_fields:
-      flow_run_id: flow_run_id
-      topic: topic
-      keys:
-        path: .
-        transform: keys
-      has_report:
-        path: report
-        transform: bool
-      report_chars:
-        path: report
-        transform: len
-      research_notes_chars:
-        path: research_notes
-        transform: len
+workflow:
+  name: langchain_python_template
+  execution: sequential
+  inputs:
+    - topic
   stages:
-    research:
-      enabled: true
-      name: Research Agent Stage
-      run_type: chain
-      tags:
-        - stage
-        - research
-      metadata:
-        component_type: agent
-        agent_name: research_agent
-        stage: research
-      input_fields:
-        flow_run_id: inputs.flow_run_id
-        topic: inputs.topic
-        current_year: inputs.current_year
-        knowledge_context_present:
-          path: inputs.knowledge_context
-          transform: bool
-      output_fields:
-        topic: topic
-        research_notes_chars:
-          path: research_notes
-          transform: len
-    reporting:
-      enabled: true
-      name: Reporting Stage
-      run_type: chain
-      tags:
-        - stage
-        - reporting
-      metadata:
-        component_type: chain
-        stage: reporting
-      input_fields:
-        flow_run_id: inputs.flow_run_id
-        topic: inputs.topic
-        current_year: inputs.current_year
-        research_notes_present:
-          path: inputs.research_notes
-          transform: bool
-        research_notes_chars:
-          path: inputs.research_notes
-          transform: len
-      output_fields:
-        topic: topic
-        report_chars:
-          path: report
-          transform: len
+    - name: content_drafting_agent
+      execution: sequential
+      depends_on: []
+      agents:
+        - content_drafting_agent
+      inputs:
+        - topic
+      outputs:
+        - draft
+
+    - name: content_review_agent
+      execution: sequential
+      depends_on:
+        - content_drafting_agent
+      agents:
+        - content_review_agent
+      inputs:
+        - topic
+        - draft
+      outputs:
+        - final_response

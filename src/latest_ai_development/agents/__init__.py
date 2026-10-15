@@ -1,2 +1,1 @@
-from __future__ import annotations
-
+"""Agent configuration, construction, runtime behavior, and lookup."""

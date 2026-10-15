@@ -39,3 +39,4 @@ chroma_db/
 # Generated reports
 report.md
 reports/
+.configurations/
