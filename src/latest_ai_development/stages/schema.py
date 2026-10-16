@@ -19,7 +19,7 @@ class StageDefinition(BaseModel):
     execution: ExecutionMode
     depends_on: list[str] = Field(default_factory=list)
     agents: list[str] = Field(min_length=1)
-    inputs: list[str] = Field(min_length=1)
+    inputs: list[str] = Field()
     outputs: list[str] = Field(min_length=1)
 
     @field_validator("depends_on", "agents", "inputs", "outputs")
