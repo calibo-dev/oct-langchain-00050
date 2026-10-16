@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Cloud and secret management
     cloud_provider: str = Field(alias="CLOUD_PROVIDER")
-    aws_region: str | None = Field(default=None, alias="AWS_REGION")
+    aws_region: str | None = Field(default='us-east-1', alias="AWS_REGION")
     azure_key_vault_url: str | None = Field(default=None, alias="AZURE_KEY_VAULT_URL")
 
     # Model providers
