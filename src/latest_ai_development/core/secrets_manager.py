@@ -13,17 +13,18 @@ from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 from dotenv import load_dotenv
 
+from latest_ai_development.core.settings import Settings, get_settings
+
 load_dotenv()
 
 
 class AWSSecretsManager:
-    def __init__(self):
+    def __init__(self, region_name: str | None):
         """
         Initializes the AWSSecretsManager with a boto3 client.
-        The AWS region is retrieved from the 'AWS_REGION' environment variable,
-        and must be explicitly configured.
+        The AWS region is supplied by application settings.
         """
-        region_name = os.environ.get("AWS_REGION", "").strip()
+        region_name = (region_name or "").strip()
         if not region_name:
             raise ValueError("AWS_REGION is required when CLOUD_PROVIDER is AWS.")
         self.session = boto3.session.Session()
@@ -87,7 +88,7 @@ class AzureKeyVaultSecretsManager:
 
 
 class SecretsManager:
-    def __init__(self):
+    def __init__(self, settings: Settings | None = None):
         """
         Initializes the SecretsManager based on the configured cloud provider.
         Supported values for CLOUD_PROVIDER are AWS and AZURE.
@@ -102,7 +103,8 @@ class SecretsManager:
         if cloud_provider == "AZURE":
             self.manager = AzureKeyVaultSecretsManager()
         elif cloud_provider == "AWS":
-            self.manager = AWSSecretsManager()
+            settings = settings if settings is not None else get_settings()
+            self.manager = AWSSecretsManager(settings.aws_region)
         else:
             raise ValueError("CLOUD_PROVIDER must be set to AWS or AZURE.")
 

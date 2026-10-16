@@ -50,7 +50,7 @@ def normalize_provider_key(provider: str) -> str:
     return provider.strip().lower()
 
 
-def resolve_api_key(secret_name: str) -> str:
+def resolve_api_key(secret_name: str, settings: Settings | None = None) -> str:
     """Resolve a provider API key from its provider-specific secret name."""
     secret_name = secret_name.strip()
     if not secret_name:
@@ -58,7 +58,7 @@ def resolve_api_key(secret_name: str) -> str:
 
     from latest_ai_development.core.secrets_manager import SecretsManager
 
-    return (SecretsManager().get_secret(secret_name) or "").strip()
+    return (SecretsManager(settings).get_secret(secret_name) or "").strip()
 
 
 def build_openai_llm(
@@ -71,6 +71,7 @@ def build_openai_llm(
         settings.openai_api_key_secret,
         "OpenAI",
         "OPENAI_API_KEY_SECRET",
+        settings=settings,
     )
     model_parameters = build_model_parameters("openai", model_name, parameters)
     return ChatOpenAI(**model_parameters, api_key=api_key)
@@ -86,6 +87,7 @@ def build_anthropic_llm(
         settings.anthropicai_api_key_secret,
         "Anthropic",
         "ANTHROPICAI_API_KEY_SECRET",
+        settings=settings,
     )
 
     try:
@@ -110,6 +112,7 @@ def build_gemini_llm(
         settings.geminiai_api_key_secret,
         "Gemini",
         "GEMINIAI_API_KEY_SECRET",
+        settings=settings,
     )
 
     try:
@@ -134,6 +137,7 @@ def build_bedrock_llm(
         settings.bedrockai_api_key_secret,
         "BedrockAI",
         "BEDROCK_AI_API_KEY_SECRET",
+        settings=settings,
     )
 
     try:
@@ -200,9 +204,10 @@ def _resolve_required_api_key(
     secret_name: str,
     provider_name: str,
     setting_name: str,
+    settings: Settings | None = None,
 ) -> str:
     """Return a provider API key or fail with a clear startup error."""
-    api_key = resolve_api_key(secret_name)
+    api_key = resolve_api_key(secret_name, settings)
     if not api_key:
         raise ValueError(f"{provider_name} API key not found. Set {setting_name}.")
     return api_key
