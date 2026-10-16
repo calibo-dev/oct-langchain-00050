@@ -23,7 +23,7 @@ class AgentDefinition(BaseModel):
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     model: list[AgentModel] = Field(min_length=1)
-    inputs: list[str] = Field(min_length=1)
+    inputs: list[str] = Field()
     outputs: list[str] = Field(min_length=1)
     tools: list[str] = Field(default_factory=list)
     # None means optional tool use; {} requires it on every invocation.

@@ -41,7 +41,7 @@ def build_tools_registry(
     selected = None if tool_names is None else tuple(dict.fromkeys(tool_names))
     if selected == ():
         return ToolsRegistry({})
-    entries = load_entries(config_dir / "tools.yml", "tools")
+    entries = load_entries(config_dir / "tools.yaml", "tools")
     selected = tuple(entries) if selected is None else selected
     missing = set(selected) - entries.keys()
     if missing:
