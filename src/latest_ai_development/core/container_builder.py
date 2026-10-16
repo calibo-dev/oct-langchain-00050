@@ -36,11 +36,11 @@ from latest_ai_development.workflow.validator import validate_workflow_configura
 logger = logging.getLogger(__name__)
 
 
-def _resolve_tool_secret(name: str) -> str | None:
+def _resolve_tool_secret(name: str, settings: Settings | None = None) -> str | None:
     """Provide this template's secret backend to the portable tool registry."""
     from latest_ai_development.core.secrets_manager import SecretsManager
 
-    return SecretsManager().get_secret(name)
+    return SecretsManager(settings).get_secret(name)
 
 
 def _adapt_tool(implementation: Any) -> BaseTool:
@@ -96,7 +96,7 @@ class ApplicationContainerBuilder:
 
         models_configuration = self._load_active_models(model_references)
         logger.debug("\n\nLoaded active models configuration:\n%s", models_configuration)
-        tool_registry = self._load_active_tools(tool_names)
+        tool_registry = self._load_active_tools(tool_names, settings)
         logger.debug("\n\nBuilt active tool registry:\n%s", tool_registry)
 
         try:
@@ -204,6 +204,7 @@ class ApplicationContainerBuilder:
     def _load_active_tools(
         self,
         tool_names: tuple[str, ...],
+        settings: Settings | None = None,
     ) -> Mapping[str, Any]:
         """Build selected native tools and retain their shared resource owner."""
         if not tool_names:
@@ -225,7 +226,7 @@ class ApplicationContainerBuilder:
         registry = build_tools_registry(
             tool_names,
             CONFIG_DIR,
-            resolve_secret=_resolve_tool_secret,
+            resolve_secret=lambda name: _resolve_tool_secret(name, settings),
             adapt_tool=_adapt_tool,
         )
         logger.info("Tool objects created count=%s", len(registry))
