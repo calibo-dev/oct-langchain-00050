@@ -36,15 +36,15 @@ class AWSSecretsManager:
         :param secret_name: The name of the secret in AWS Secrets Manager.
         :param secret_key: Optional key to retrieve when the secret contains JSON.
         """
-        get_secret_value_response = self.client.get_secret_value(SecretId=secret_name)
+        try:
+            response = self.client.get_secret_value(SecretId=secret_name)
+            secret = response["SecretString"]
+            if secret_key:
+                return json.loads(secret).get(secret_key)
+            return secret
+        except Exception as exc:
+            raise ValueError("Failed to retrieve secret from AWS Secrets Manager.") from exc
 
-        # Decrypts secret using the associated KMS key.
-        secret = get_secret_value_response["SecretString"]
-
-        if secret_key:
-            secret_dict = json.loads(secret)
-            return secret_dict.get(secret_key)
-        return secret
 
 
 class AzureKeyVaultSecretsManager:
