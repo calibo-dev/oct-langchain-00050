@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str | None = Field(default='INFO', alias="LOG_LEVEL")
 
-    context: str | None = Field(default='knowledge', alias="CONTEXT")
+    context: str | None = Field(default='/', alias="CONTEXT")
 
     # Cloud and secret management
     cloud_provider: str = Field(alias="CLOUD_PROVIDER")
