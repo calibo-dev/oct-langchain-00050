@@ -43,12 +43,12 @@ def create_app() -> FastAPI:
         raise
 
     settings = container.settings
-    api_root_path = settings.api_root_path
+    context = settings.context
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
         description="Configuration-driven LangChain workflow with shared provider tools",
-        root_path=api_root_path,
+        root_path=context,
         lifespan=lifespan,
     )
     app.add_middleware(RequestLoggingMiddleware)
@@ -63,8 +63,8 @@ def create_app() -> FastAPI:
         container.workflow_definition, container.workflow.context_configuration
     )
     app.include_router(api_router)
-    if api_root_path:
-        app.include_router(api_router, prefix=api_root_path, include_in_schema=False)
+    if context:
+        app.include_router(api_router, prefix=context, include_in_schema=False)
 
     return app
 
