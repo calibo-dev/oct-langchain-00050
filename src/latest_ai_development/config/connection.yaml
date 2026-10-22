@@ -11,8 +11,7 @@ connections:
       database: DEV_DB
       schema: DEV_SCHEMA    
       authentication:
-        directPatToken: SNOWFLAKE_HOSPITAL_CORE_PAT_TOKEN
-        secret: SNOWFLAKE_HOSPITAL_CORE_PAT_SECRET_NAME
+        secret: SNOWFLAKE_HOSPITAL_CORE_PAT_SECRET
       connectionOptions:
         clientSessionKeepAlive: false
         loginTimeout: 30
@@ -28,8 +27,7 @@ connections:
       database: DEV_DB
       schema: DEV_SCHEMA
       authentication:
-        directPatToken: SNOWFLAKE_HOSPITAL_STAFF_PAT_TOKEN
-        secret: SNOWFLAKE_HOSPITAL_STAFF_PAT_SECRET_NAME
+        secret: SNOWFLAKE_HOSPITAL_STAFF_PAT_SECRET
       connectionOptions:
         clientSessionKeepAlive: false
         loginTimeout: 30
