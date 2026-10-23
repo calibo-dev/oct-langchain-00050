@@ -30,6 +30,7 @@ from latest_ai_development.models.registry import ModelRegistry
 from latest_ai_development.models.schema import ModelsConfiguration
 from latest_ai_development.stages.config import load_workflow_definition
 from latest_ai_development.stages.schema import WorkflowDefinition
+from latest_ai_development.tracking import initialize_langsmith_tracing
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 from latest_ai_development.workflow.validator import validate_workflow_configuration
 
@@ -78,6 +79,7 @@ class ApplicationContainerBuilder:
         logger.info("Application startup started")
 
         settings = self._load_settings()
+        initialize_langsmith_tracing()
         logger.debug("\n\nLoaded settings:\n%s", settings)
         workflow_definition = self._load_workflow()
         logger.debug("\n\nLoaded workflow definition:\n%s", workflow_definition)
