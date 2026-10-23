@@ -16,10 +16,6 @@ def validate_settings_configuration(settings: Settings) -> None:
     logger.debug("Application configuration validation started")
     errors: list[str] = []
 
-    # Context is part of the runtime contract, even for workflows without retrieval.
-    if not settings.context.strip():
-        errors.append("CONTEXT must not be empty")
-
     # Secret-manager configuration depends on the selected cloud provider.
     if settings.cloud_provider not in {"AWS", "AZURE"}:
         errors.append(
@@ -30,17 +26,16 @@ def validate_settings_configuration(settings: Settings) -> None:
     elif settings.cloud_provider == "AZURE" and not settings.azure_key_vault_url.strip():
         errors.append("AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is 'AZURE'")
 
-    # FastAPI accepts an empty root path or a path such as /testing. A single
-    # slash and trailing slashes create ambiguous duplicate routes.
-    if settings.api_root_path:
-        if not settings.api_root_path.startswith("/"):
-            errors.append(f"API_ROOT_PATH must start with '/'; received '{settings.api_root_path}'")
-        elif settings.api_root_path == "/":
-            errors.append("API_ROOT_PATH must be empty or a named path, not '/'")
-        elif settings.api_root_path.endswith("/"):
-            errors.append(
-                f"API_ROOT_PATH must not end with '/'; received '{settings.api_root_path}'"
-            )
+# CONTEXT is the server URL base path
+    if not settings.context.strip():
+        errors.append("CONTEXT must not be empty")
+    elif not settings.context.startswith("/"):
+        errors.append(f"CONTEXT must start with '/'; received '{settings.context}'")
+    elif any(character.isspace() for character in settings.context) or any(
+        character in settings.context for character in ("?", "#", "\\")
+    ):
+        errors.append("CONTEXT must be a URL path without whitespace, query strings, or fragments")
+
 
     # Ports outside the TCP range cannot be bound by the API server.
     if not 1 <= settings.port <= 65535:

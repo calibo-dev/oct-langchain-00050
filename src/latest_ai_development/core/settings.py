@@ -26,13 +26,21 @@ class Settings(BaseSettings):
     # API server
     api_host: str | None = Field(default='0.0.0.0', alias="API_HOST")
     port: int | None = Field(default=8765, alias="PORT")
-    api_root_path: str | None = Field(default=None, alias="API_ROOT_PATH")
+    context: str = Field(alias="CONTEXT")
 
     # Runtime and logging
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str | None = Field(default='INFO', alias="LOG_LEVEL")
 
-    context: str | None = Field(default='/', alias="CONTEXT")
+    # Optional tracing.
+    tracing_backend: str | None = Field(default=None, alias="TRACING_BACKEND")
+    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
+    langsmith_api_key_secret: str | None = Field(
+        default=None,
+        alias="LANGSMITH_API_KEY_SECRET",
+    )
+    langsmith_project: str | None = Field(default=None, alias="LANGSMITH_PROJECT")
+    langsmith_endpoint: str | None = Field(default=None, alias="LANGSMITH_ENDPOINT")
 
     # Cloud and secret management
     cloud_provider: str = Field(alias="CLOUD_PROVIDER")

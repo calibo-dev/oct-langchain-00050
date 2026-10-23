@@ -57,6 +57,7 @@ def build_workflow_router(
         endpoint,
         methods=["POST"],
         name=definition.name,
+        operation_id=definition.name,
         summary=f"Run {definition.name}",
     )
     return router

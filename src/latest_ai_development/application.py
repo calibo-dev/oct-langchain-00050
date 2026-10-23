@@ -43,7 +43,7 @@ def create_app() -> FastAPI:
         raise
 
     settings = container.settings
-    context = settings.context
+    context = settings.context.rstrip("/")
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
@@ -63,8 +63,8 @@ def create_app() -> FastAPI:
         container.workflow_definition, container.workflow.context_configuration
     )
     app.include_router(api_router)
-    if context:
-        app.include_router(api_router, prefix=context, include_in_schema=False)
+    # if context:
+    #     app.include_router(api_router, prefix=context, include_in_schema=False)
 
     return app
 
